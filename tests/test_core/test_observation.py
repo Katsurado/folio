@@ -113,3 +113,20 @@ class TestObservation:
                 outputs={"yield": 85.5},
                 timestamp="2024-01-15",
             )
+
+    def test_failed_defaults_to_false(self):
+        obs = Observation(
+            project_id=1,
+            inputs={"temperature": 50.0},
+            outputs={"yield": 85.5},
+        )
+        assert obs.failed is False
+
+    def test_failed_can_be_set_true(self):
+        obs = Observation(
+            project_id=1,
+            inputs={"temperature": 50.0},
+            outputs={"yield": 85.5},
+            failed=True,
+        )
+        assert obs.failed is True

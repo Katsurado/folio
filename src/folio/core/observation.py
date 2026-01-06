@@ -14,6 +14,7 @@ class Observation:
     notes: str | None = None
     tag: str | None = None
     raw_data_path: str | None = None
+    failed: bool = False
 
     def __post_init__(self):
         if not isinstance(self.project_id, int) or self.project_id < 1:
