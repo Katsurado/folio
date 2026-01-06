@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Folio is an open-source electronic lab notebook with intelligent experiment suggestions for chemistry labs. Human-in-the-loop MVP, with architecture enabling closed-loop automation later.
+Folio is an open-source electronic lab notebook with intelligent experiment suggestions for chemistry labs. Human-in-the-loop MVP, with architecture enabling closed-loop automation.
 
 Target users: lab scientists. No coding required (GUI), but API available for those who want it.
 
@@ -13,12 +13,62 @@ Three pillars, all required:
 2. **PDF Export**: Quarto-based, professional lab notebook output
 3. **BO Suggestions**: Smart next-experiment recommendations
 
+Plus:
+- **libSQL Cloud Sync**: Distributed data sharing for collaboration (Claude-Light integration)
+- **ClaudeLightExecutor**: Fully autonomous closed-loop demo
+- **Documentation**: Proper docstrings (NumPy-style) on all functions
+
 Two interfaces:
 - **Streamlit GUI**: Full workflow for non-coders
 - **Python API**: Same functionality for Jupyter/Quarto power users
 
-Plus:
-- **Documentation**: Proper docstrings (NumPy-style) on all public and internal functions
+## v1.1 Scope (Post-MVP)
+
+- **KABO Embeddings**: Categorical inputs → LLM description → embedding → PCA → latent GP
+- **LLM-informed initialization**: Query LLM for literature-based starting conditions before BO
+
+## Development Workflow
+
+**Test-first approach:**
+1. Claude Code writes: test cases + function signatures with docstrings
+2. Developer writes: implementation
+3. Run pytest → iterate until green
+
+Example:
+```python
+# Claude Code writes this
+def encode_categorical(value: str, levels: list[str]) -> int:
+    """Convert categorical value to integer index.
+
+    Parameters
+    ----------
+    value : str
+        The categorical value to encode.
+    levels : list[str]
+        Valid levels for this categorical.
+
+    Returns
+    -------
+    int
+        Index of value in levels.
+
+    Raises
+    ------
+    InvalidInputError
+        If value not in levels.
+    """
+    raise NotImplementedError
+
+# Test
+def test_encode_categorical_valid():
+    assert encode_categorical("ethanol", ["water", "ethanol", "dmso"]) == 1
+
+def test_encode_categorical_invalid():
+    with pytest.raises(InvalidInputError):
+        encode_categorical("acetone", ["water", "ethanol", "dmso"])
+```
+
+Developer fills in implementation. Tests tell you when you're done.
 
 ## Architecture
 
@@ -29,7 +79,7 @@ src/folio/
 ├── surrogates/     # Surrogate interface + implementations (GP, etc.)
 ├── acquisitions/   # Acquisition interface + implementations (EI, UCB)
 ├── targets/        # Target interface (direct, derived)
-├── executors/      # Executor interface (human, instrument)
+├── executors/      # Executor interface (HumanExecutor, ClaudeLightExecutor)
 ├── ui/             # Streamlit app
 ├── api.py          # High-level user-facing functions
 └── exceptions.py   # Custom exceptions
@@ -43,14 +93,50 @@ src/folio/
 - **Recommender**: Suggests next experiments. Implementations: BORecommender, RandomRecommender, GridRecommender
 - **Surrogate**: Model that fits observations. Interface: fit(X, y), predict(X) → (mean, std)
 - **Acquisition**: Scores candidate points. Interface: evaluate(X, surrogate, best_y) → scores
-- **Executor**: Runs experiments. HumanExecutor for MVP, InstrumentExecutor for future closed-loop
+- **Executor**: Runs experiments. HumanExecutor for manual, ClaudeLightExecutor for autonomous closed-loop
+
+## Executor Interface
+
+```python
+class Executor(ABC):
+    @abstractmethod
+    def run(self, inputs: dict) -> dict:
+        """Run experiment, return outputs."""
+
+class HumanExecutor(Executor):
+    def run(self, inputs):
+        # Display to user, wait for manual entry
+
+class ClaudeLightExecutor(Executor):
+    def __init__(self, api_url):
+        self.api_url = api_url
+
+    def run(self, inputs):
+        res = requests.get(self.api_url, params=inputs)
+        return res.json()["out"]
+```
+
+## Database Configuration
+
+```python
+# Local SQLite (default)
+db = Database("project.db")
+
+# libSQL cloud sync (for Claude-Light collaboration)
+db = Database(
+    "project.db",
+    sync_url="libsql://your-db.turso.io",
+    auth_token="your-token"
+)
+# Calls conn.sync() after writes
+```
 
 ## Data Flow
 
 ```
 User enters observation (inputs, outputs)
         ↓
-    Store in SQLite
+    Store in SQLite/libSQL
         ↓
     Target.compute(observation) → scalar y
         ↓
@@ -58,7 +144,9 @@ User enters observation (inputs, outputs)
         ↓
     Recommender.suggest() → next inputs
         ↓
-    Display to user
+    Executor.run(inputs) → outputs  [or display to user]
+        ↓
+    Loop
 ```
 
 ## Coding Conventions
@@ -90,7 +178,7 @@ User enters observation (inputs, outputs)
 
 ## Docstrings
 
-Write thorough NumPy-style docstrings. Good documentation is not slop.
+Write thorough NumPy-style docstrings. Good documentation is not slop. For functions/methods where the useage is not immidiately obvious, include example in the docstring.
 
 ```python
 # Good
@@ -167,17 +255,19 @@ raise Exception("Project not found")
   - [x] DifferenceTarget: first - second
   - [x] DistanceTarget: euclidean/mse/mae distance to target values
   - [x] SlopeTarget: linear fit slope across multiple outputs
+- [ ] Add images field to Observation
+- [ ] Add procedure, hazards fields to Project
+- [ ] libSQL cloud sync support in Database
 - [ ] Recommender interface
 - [ ] Surrogate interface + GP implementation
 - [ ] Acquisition interface + EI/UCB implementation
 - [ ] BORecommender
 - [ ] RandomRecommender, GridRecommender
-- [ ] Executor interface + HumanExecutor
+- [ ] Executor interface
+  - [ ] HumanExecutor
+  - [ ] ClaudeLightExecutor
 - [ ] Export to PDF via Quarto
 - [ ] Streamlit UI
-- [ ] Add images field to Observation
-- [ ] Add procedure, hazards fields to Project
-- [ ] Proper docstrings on all functions (NumPy-style)
 
 ## Commands
 
