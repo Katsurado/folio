@@ -1,10 +1,21 @@
 """Project definition and validation."""
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal
+
+import numpy as np
 
 from folio.core.schema import InputSpec, OutputSpec
 from folio.exceptions import InvalidInputError, InvalidOutputError, InvalidSchemaError
+from folio.targets import (
+    DifferenceTarget,
+    DirectTarget,
+    RatioTarget,
+    SlopeTarget,
+)
+
+if TYPE_CHECKING:
+    from folio.core.observation import Observation
 
 
 @dataclass
@@ -13,8 +24,19 @@ class TargetConfig:
 
     name: str
     mode: str = "maximize"
-    # For derived targets, specify the function to compute from outputs
-    derived_fn: str | None = None
+    target_type: Literal["direct", "ratio", "difference", "slope"] = "direct"
+
+    # used by ratio target
+    numerator: str | None = None
+    denominator: str | None = None
+
+    # used by difference target
+    first: str | None = None
+    second: str | None = None
+
+    # used by slope target
+    slope_outputs: list[str] | None = None
+    slope_x: list[float] | None = None
 
     def __post_init__(self) -> None:
         if self.mode not in ("maximize", "minimize"):
@@ -94,8 +116,8 @@ class Project:
                     f"got '{inp.type}'"
                 )
 
-        # Validate target references a valid output
-        if self.target_config.derived_fn is None:
+        # Validate target references a valid output for direct targets
+        if self.target_config.target_type == "direct":
             output_names_set = set(output_names)
             if self.target_config.name not in output_names_set:
                 raise InvalidSchemaError(
@@ -121,7 +143,8 @@ class Project:
             if inp.type == "continuous":
                 if not isinstance(value, int | float):
                     raise InvalidInputError(
-                        f"Input '{inp.name}' must be numeric, got {type(value).__name__}"
+                        f"Input '{inp.name}' must be numeric, "
+                        f"got {type(value).__name__}"
                     )
                 if not inp.bounds[0] <= value <= inp.bounds[1]:
                     raise InvalidInputError(
@@ -164,3 +187,36 @@ class Project:
     def get_bounds(self) -> list[tuple[float, float]]:
         """Return bounds for continuous inputs, in order."""
         return [inp.bounds for inp in self.inputs if inp.type == "continuous"]
+
+    def get_target(self) -> DirectTarget | RatioTarget | DifferenceTarget | SlopeTarget:
+        """Return the appropriate target instance based on target_config."""
+        config = self.target_config
+        if config.target_type == "direct":
+            return DirectTarget(config.name, config.mode)
+        elif config.target_type == "ratio":
+            return RatioTarget(config.numerator, config.denominator, config.mode)
+        elif config.target_type == "difference":
+            return DifferenceTarget(config.first, config.second, config.mode)
+        elif config.target_type == "slope":
+            return SlopeTarget(config.slope_outputs, config.slope_x, config.mode)
+        else:
+            raise ValueError(f"Unknown target type: {config.target_type}")
+
+    def get_training_data(
+        self, observations: list["Observation"]
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Extract training data from observations."""
+        target = self.get_target()
+        input_names = [inp.name for inp in self.inputs]
+        X_rows = []
+        y_values = []
+        for obs in observations:
+            if obs.failed:
+                continue
+            y = target.compute(obs)
+            if y is None:
+                continue
+            row = [obs.inputs[name] for name in input_names]
+            X_rows.append(row)
+            y_values.append(y)
+        return np.array(X_rows), np.array(y_values)
