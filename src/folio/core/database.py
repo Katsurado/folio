@@ -62,7 +62,7 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
 def get_connection(db_path: Path = DEFAULT_DB_PATH) -> Iterator[sqlite3.Connection]:
     """Context manager for database connections."""
     _ensure_db_dir(db_path)
-    conn = sqlite3.connect(db_path, detect_types=sqlite3.PARSE_DECLTYPES)
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     try:
