@@ -20,7 +20,8 @@ class InputSpec:
             if self.bounds[0] >= self.bounds[1]:
                 raise InvalidSchemaError(
                     f"Continuous input '{self.name}' has invalid bounds: "
-                    f"lower ({self.bounds[0]}) must be less than upper ({self.bounds[1]})."
+                    f"lower ({self.bounds[0]}) must be less than "
+                    f"upper ({self.bounds[1]})."
                 )
         elif self.type == "categorical":
             if self.levels is None or len(self.levels) < 2:
