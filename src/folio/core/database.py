@@ -46,12 +46,27 @@ CREATE INDEX IF NOT EXISTS idx_observations_project_id ON observations(project_i
 
 
 def _ensure_db_dir(db_path: Path) -> None:
-    """Create database directory if it doesn't exist."""
+    """Create database directory if it doesn't exist.
+
+    Parameters
+    ----------
+    db_path : Path
+        Path to the database file. Parent directories will be created if needed.
+    """
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
 
 def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
-    """Initialize the database with schema."""
+    """Initialize the database with schema tables.
+
+    Creates the projects and observations tables if they don't exist.
+    Safe to call multiple times; existing tables are not modified.
+
+    Parameters
+    ----------
+    db_path : Path, optional
+        Path to the database file. Defaults to ~/.folio/folio.db.
+    """
     _ensure_db_dir(db_path)
     with sqlite3.connect(db_path) as conn:
         conn.executescript(_SCHEMA)
@@ -60,7 +75,26 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
 
 @contextmanager
 def get_connection(db_path: Path = DEFAULT_DB_PATH) -> Iterator[sqlite3.Connection]:
-    """Context manager for database connections."""
+    """Context manager for database connections with automatic commit/rollback.
+
+    Opens a connection with foreign keys enabled and Row factory configured.
+    Automatically commits on successful exit or rolls back on exception.
+
+    Parameters
+    ----------
+    db_path : Path, optional
+        Path to the database file. Defaults to ~/.folio/folio.db.
+
+    Yields
+    ------
+    sqlite3.Connection
+        Database connection with Row factory enabled.
+
+    Examples
+    --------
+    >>> with get_connection() as conn:
+    ...     conn.execute("SELECT * FROM projects")
+    """
     _ensure_db_dir(db_path)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -76,47 +110,146 @@ def get_connection(db_path: Path = DEFAULT_DB_PATH) -> Iterator[sqlite3.Connecti
 
 
 def _serialize_inputs(inputs: list[InputSpec]) -> str:
-    """Serialize InputSpec list to JSON."""
+    """Serialize InputSpec list to JSON string for database storage.
+
+    Parameters
+    ----------
+    inputs : list[InputSpec]
+        Input specifications to serialize.
+
+    Returns
+    -------
+    str
+        JSON string representation.
+    """
     return json.dumps([asdict(inp) for inp in inputs])
 
 
 def _deserialize_inputs(inputs_json: str) -> list[InputSpec]:
-    """Deserialize JSON to InputSpec list."""
+    """Deserialize JSON string to InputSpec list.
+
+    Parameters
+    ----------
+    inputs_json : str
+        JSON string from database.
+
+    Returns
+    -------
+    list[InputSpec]
+        Reconstructed input specifications.
+    """
     return [InputSpec(**d) for d in json.loads(inputs_json)]
 
 
 def _serialize_outputs(outputs: list[OutputSpec]) -> str:
-    """Serialize OutputSpec list to JSON."""
+    """Serialize OutputSpec list to JSON string for database storage.
+
+    Parameters
+    ----------
+    outputs : list[OutputSpec]
+        Output specifications to serialize.
+
+    Returns
+    -------
+    str
+        JSON string representation.
+    """
     return json.dumps([asdict(out) for out in outputs])
 
 
 def _deserialize_outputs(outputs_json: str) -> list[OutputSpec]:
-    """Deserialize JSON to OutputSpec list."""
+    """Deserialize JSON string to OutputSpec list.
+
+    Parameters
+    ----------
+    outputs_json : str
+        JSON string from database.
+
+    Returns
+    -------
+    list[OutputSpec]
+        Reconstructed output specifications.
+    """
     return [OutputSpec(**d) for d in json.loads(outputs_json)]
 
 
 def _serialize_target_config(config: TargetConfig) -> str:
-    """Serialize TargetConfig to JSON."""
+    """Serialize TargetConfig to JSON string for database storage.
+
+    Parameters
+    ----------
+    config : TargetConfig
+        Target configuration to serialize.
+
+    Returns
+    -------
+    str
+        JSON string representation.
+    """
     return json.dumps(asdict(config))
 
 
 def _deserialize_target_config(config_json: str) -> TargetConfig:
-    """Deserialize JSON to TargetConfig."""
+    """Deserialize JSON string to TargetConfig.
+
+    Parameters
+    ----------
+    config_json : str
+        JSON string from database.
+
+    Returns
+    -------
+    TargetConfig
+        Reconstructed target configuration.
+    """
     return TargetConfig(**json.loads(config_json))
 
 
 def _serialize_recommender_config(config: RecommenderConfig) -> str:
-    """Serialize RecommenderConfig to JSON."""
+    """Serialize RecommenderConfig to JSON string for database storage.
+
+    Parameters
+    ----------
+    config : RecommenderConfig
+        Recommender configuration to serialize.
+
+    Returns
+    -------
+    str
+        JSON string representation.
+    """
     return json.dumps(asdict(config))
 
 
 def _deserialize_recommender_config(config_json: str) -> RecommenderConfig:
-    """Deserialize JSON to RecommenderConfig."""
+    """Deserialize JSON string to RecommenderConfig.
+
+    Parameters
+    ----------
+    config_json : str
+        JSON string from database.
+
+    Returns
+    -------
+    RecommenderConfig
+        Reconstructed recommender configuration.
+    """
     return RecommenderConfig(**json.loads(config_json))
 
 
 def _row_to_project(row: sqlite3.Row) -> Project:
-    """Convert database row to Project."""
+    """Convert database row to Project instance.
+
+    Parameters
+    ----------
+    row : sqlite3.Row
+        Database row from projects table.
+
+    Returns
+    -------
+    Project
+        Reconstructed project with all fields populated.
+    """
     return Project(
         id=row["id"],
         name=row["name"],
@@ -130,7 +263,25 @@ def _row_to_project(row: sqlite3.Row) -> Project:
 
 
 def create_project(project: Project, db_path: Path = DEFAULT_DB_PATH) -> Project:
-    """Create a new project in the database."""
+    """Create a new project in the database.
+
+    Parameters
+    ----------
+    project : Project
+        Project to create. The id field is ignored; a new ID will be assigned.
+    db_path : Path, optional
+        Path to the database file. Defaults to ~/.folio/folio.db.
+
+    Returns
+    -------
+    Project
+        The created project with its assigned database ID.
+
+    Raises
+    ------
+    ProjectExistsError
+        If a project with the same name already exists.
+    """
     init_db(db_path)
     with get_connection(db_path) as conn:
         try:
@@ -167,7 +318,25 @@ def create_project(project: Project, db_path: Path = DEFAULT_DB_PATH) -> Project
 
 
 def get_project(name: str, db_path: Path = DEFAULT_DB_PATH) -> Project:
-    """Get a project by name."""
+    """Get a project by name.
+
+    Parameters
+    ----------
+    name : str
+        Name of the project to retrieve.
+    db_path : Path, optional
+        Path to the database file. Defaults to ~/.folio/folio.db.
+
+    Returns
+    -------
+    Project
+        The requested project.
+
+    Raises
+    ------
+    ProjectNotFoundError
+        If no project with the given name exists.
+    """
     init_db(db_path)
     with get_connection(db_path) as conn:
         row = conn.execute("SELECT * FROM projects WHERE name = ?", (name,)).fetchone()
@@ -180,7 +349,25 @@ def get_project(name: str, db_path: Path = DEFAULT_DB_PATH) -> Project:
 
 
 def get_project_by_id(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> Project:
-    """Get a project by ID."""
+    """Get a project by database ID.
+
+    Parameters
+    ----------
+    project_id : int
+        Database ID of the project to retrieve.
+    db_path : Path, optional
+        Path to the database file. Defaults to ~/.folio/folio.db.
+
+    Returns
+    -------
+    Project
+        The requested project.
+
+    Raises
+    ------
+    ProjectNotFoundError
+        If no project with the given ID exists.
+    """
     init_db(db_path)
     with get_connection(db_path) as conn:
         row = conn.execute(
@@ -194,7 +381,18 @@ def get_project_by_id(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> Proje
 
 
 def list_projects(db_path: Path = DEFAULT_DB_PATH) -> list[str]:
-    """List all project names."""
+    """List all project names in alphabetical order.
+
+    Parameters
+    ----------
+    db_path : Path, optional
+        Path to the database file. Defaults to ~/.folio/folio.db.
+
+    Returns
+    -------
+    list[str]
+        Names of all projects, sorted alphabetically.
+    """
     init_db(db_path)
     with get_connection(db_path) as conn:
         rows = conn.execute("SELECT name FROM projects ORDER BY name").fetchall()
@@ -202,7 +400,24 @@ def list_projects(db_path: Path = DEFAULT_DB_PATH) -> list[str]:
 
 
 def delete_project(name: str, db_path: Path = DEFAULT_DB_PATH) -> None:
-    """Delete a project and all its observations."""
+    """Delete a project and all its observations.
+
+    Parameters
+    ----------
+    name : str
+        Name of the project to delete.
+    db_path : Path, optional
+        Path to the database file. Defaults to ~/.folio/folio.db.
+
+    Raises
+    ------
+    ProjectNotFoundError
+        If no project with the given name exists.
+
+    Notes
+    -----
+    All observations associated with the project are deleted via CASCADE.
+    """
     with get_connection(db_path) as conn:
         cursor = conn.execute("DELETE FROM projects WHERE name = ?", (name,))
         if cursor.rowcount == 0:
@@ -214,7 +429,18 @@ def delete_project(name: str, db_path: Path = DEFAULT_DB_PATH) -> None:
 
 
 def _row_to_observation(row: sqlite3.Row) -> Observation:
-    """Convert database row to Observation."""
+    """Convert database row to Observation instance.
+
+    Parameters
+    ----------
+    row : sqlite3.Row
+        Database row from observations table.
+
+    Returns
+    -------
+    Observation
+        Reconstructed observation with all fields populated.
+    """
     timestamp = row["timestamp"]
     if isinstance(timestamp, str):
         timestamp = datetime.fromisoformat(timestamp)
@@ -233,7 +459,20 @@ def _row_to_observation(row: sqlite3.Row) -> Observation:
 def add_observation(
     observation: Observation, db_path: Path = DEFAULT_DB_PATH
 ) -> Observation:
-    """Add an observation to the database."""
+    """Add an observation to the database.
+
+    Parameters
+    ----------
+    observation : Observation
+        Observation to add. The id field is ignored; a new ID will be assigned.
+    db_path : Path, optional
+        Path to the database file. Defaults to ~/.folio/folio.db.
+
+    Returns
+    -------
+    Observation
+        The added observation with its assigned database ID.
+    """
     with get_connection(db_path) as conn:
         cursor = conn.execute(
             """
@@ -271,7 +510,20 @@ def add_observation(
 def get_observations(
     project_id: int, db_path: Path = DEFAULT_DB_PATH
 ) -> list[Observation]:
-    """Get all observations for a project, ordered by timestamp."""
+    """Get all observations for a project, ordered by timestamp.
+
+    Parameters
+    ----------
+    project_id : int
+        Database ID of the project.
+    db_path : Path, optional
+        Path to the database file. Defaults to ~/.folio/folio.db.
+
+    Returns
+    -------
+    list[Observation]
+        All observations for the project, sorted chronologically.
+    """
     with get_connection(db_path) as conn:
         rows = conn.execute(
             """
@@ -287,7 +539,25 @@ def get_observations(
 def get_observation(
     observation_id: int, db_path: Path = DEFAULT_DB_PATH
 ) -> Observation:
-    """Get a single observation by ID."""
+    """Get a single observation by database ID.
+
+    Parameters
+    ----------
+    observation_id : int
+        Database ID of the observation to retrieve.
+    db_path : Path, optional
+        Path to the database file. Defaults to ~/.folio/folio.db.
+
+    Returns
+    -------
+    Observation
+        The requested observation.
+
+    Raises
+    ------
+    ValueError
+        If no observation with the given ID exists.
+    """
     with get_connection(db_path) as conn:
         row = conn.execute(
             "SELECT * FROM observations WHERE id = ?", (observation_id,)
@@ -300,7 +570,20 @@ def get_observation(
 
 
 def delete_observation(observation_id: int, db_path: Path = DEFAULT_DB_PATH) -> None:
-    """Delete an observation by ID."""
+    """Delete an observation by database ID.
+
+    Parameters
+    ----------
+    observation_id : int
+        Database ID of the observation to delete.
+    db_path : Path, optional
+        Path to the database file. Defaults to ~/.folio/folio.db.
+
+    Raises
+    ------
+    ValueError
+        If no observation with the given ID exists.
+    """
     with get_connection(db_path) as conn:
         cursor = conn.execute(
             "DELETE FROM observations WHERE id = ?", (observation_id,)
@@ -311,7 +594,20 @@ def delete_observation(observation_id: int, db_path: Path = DEFAULT_DB_PATH) -> 
 
 
 def count_observations(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> int:
-    """Count observations for a project."""
+    """Count the number of observations for a project.
+
+    Parameters
+    ----------
+    project_id : int
+        Database ID of the project.
+    db_path : Path, optional
+        Path to the database file. Defaults to ~/.folio/folio.db.
+
+    Returns
+    -------
+    int
+        Number of observations recorded for the project.
+    """
     with get_connection(db_path) as conn:
         row = conn.execute(
             "SELECT COUNT(*) as count FROM observations WHERE project_id = ?",

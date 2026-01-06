@@ -20,21 +20,59 @@ if TYPE_CHECKING:
 
 @dataclass
 class TargetConfig:
-    """Configuration for the optimization target."""
+    """Configuration for the optimization target.
+
+    Defines how to extract a scalar optimization target from observations.
+    Supports direct output values, ratios, differences, and slope calculations.
+
+    Parameters
+    ----------
+    name : str
+        For "direct" targets, the output name to optimize. For other target types,
+        a descriptive name for the derived metric.
+    mode : str, optional
+        Optimization direction: "maximize" or "minimize". Defaults to "maximize".
+    target_type : {"direct", "ratio", "difference", "slope"}, optional
+        How to compute the target value. Defaults to "direct".
+    numerator : str | None, optional
+        Output name for ratio numerator. Required when target_type is "ratio".
+    denominator : str | None, optional
+        Output name for ratio denominator. Required when target_type is "ratio".
+    first : str | None, optional
+        Output name for first term in difference. Required when
+        target_type is "difference".
+    second : str | None, optional
+        Output name for second term in difference. Required when
+        target_type is "difference".
+    slope_outputs : list[str] | None, optional
+        Output names for slope calculation (y-values). Required when
+        target_type is "slope". Must have at least 3 outputs.
+    slope_x : list[float] | None, optional
+        X-values for slope calculation. Required when target_type is "slope".
+        Must have same length as slope_outputs.
+
+    Raises
+    ------
+    InvalidSchemaError
+        If mode is not "maximize" or "minimize".
+
+    Examples
+    --------
+    >>> direct = TargetConfig("yield", mode="maximize")
+    >>> ratio = TargetConfig("selectivity", target_type="ratio",
+    ...                      numerator="product_a", denominator="product_b")
+    """
 
     name: str
     mode: str = "maximize"
     target_type: Literal["direct", "ratio", "difference", "slope"] = "direct"
 
-    # used by ratio target
     numerator: str | None = None
     denominator: str | None = None
 
-    # used by difference target
     first: str | None = None
     second: str | None = None
 
-    # used by slope target
     slope_outputs: list[str] | None = None
     slope_x: list[float] | None = None
 
@@ -47,22 +85,89 @@ class TargetConfig:
 
 @dataclass
 class RecommenderConfig:
-    """Configuration for the recommender."""
+    """Configuration for the experiment recommender.
+
+    Defines how the recommender suggests next experiments. Supports Bayesian
+    optimization with configurable surrogate models and acquisition functions,
+    as well as simpler strategies like random or grid search.
+
+    Parameters
+    ----------
+    type : str, optional
+        Recommender strategy: "bayesian", "random", or "grid". Defaults to "bayesian".
+    surrogate : str, optional
+        Surrogate model for Bayesian optimization: "gp" (Gaussian Process).
+        Defaults to "gp". Ignored for non-Bayesian recommenders.
+    acquisition : str, optional
+        Acquisition function for Bayesian optimization: "ei" (Expected Improvement)
+        or "ucb" (Upper Confidence Bound). Defaults to "ei".
+        Ignored for non-Bayesian recommenders.
+    n_initial : int, optional
+        Number of initial random samples before using the surrogate model.
+        Defaults to 5. The surrogate needs sufficient data to make useful predictions.
+    kwargs : dict[str, Any], optional
+        Additional keyword arguments passed to the recommender implementation.
+        For example, {"beta": 2.0} for UCB acquisition function.
+
+    Examples
+    --------
+    >>> bo_config = RecommenderConfig(type="bayesian", surrogate="gp", acquisition="ei")
+    >>> random_config = RecommenderConfig(type="random", n_initial=10)
+    """
 
     type: str = "bayesian"
-    # Surrogate model type for Bayesian optimization
     surrogate: str = "gp"
-    # Acquisition function type
     acquisition: str = "ei"
-    # Number of initial random samples before using surrogate
     n_initial: int = 5
-    # Additional kwargs passed to recommender
     kwargs: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class Project:
-    """Experiment schema defining inputs, outputs, target, and recommender."""
+    """Experiment schema defining inputs, outputs, target, and recommender.
+
+    A Project defines the structure of an experiment series: what inputs can be
+    varied, what outputs are measured, what target to optimize, and how to suggest
+    new experiments. Projects are persisted to the database and can be retrieved
+    by name.
+
+    Parameters
+    ----------
+    id : int | None
+        Database ID assigned after persistence. None for new projects.
+    name : str
+        Unique project name. Cannot be empty.
+    inputs : list[InputSpec]
+        Input variable specifications. Must have at least one input.
+        Names must be unique within the project.
+    outputs : list[OutputSpec]
+        Output variable specifications. Must have at least one output.
+        Names must be unique within the project.
+    target_config : TargetConfig
+        Configuration for the optimization target.
+    recommender_config : RecommenderConfig, optional
+        Configuration for the experiment recommender. Defaults to Bayesian
+        optimization with GP surrogate and EI acquisition.
+
+    Raises
+    ------
+    InvalidSchemaError
+        If name is empty, no inputs/outputs defined, duplicate names exist,
+        input bounds are invalid, or target references a non-existent output.
+
+    Examples
+    --------
+    >>> project = Project(
+    ...     id=None,
+    ...     name="yield_optimization",
+    ...     inputs=[
+    ...         InputSpec("temperature", "continuous", bounds=(20.0, 100.0)),
+    ...         InputSpec("solvent", "categorical", levels=["water", "ethanol"]),
+    ...     ],
+    ...     outputs=[OutputSpec("yield"), OutputSpec("purity")],
+    ...     target_config=TargetConfig("yield", mode="maximize"),
+    ... )
+    """
 
     id: int | None
     name: str
@@ -75,7 +180,17 @@ class Project:
         self._validate_schema()
 
     def _validate_schema(self) -> None:
-        """Validate project schema at construction."""
+        """Validate project schema at construction.
+
+        Checks that the project has a non-empty name, at least one input and
+        output, no duplicate names, valid input bounds/levels, and that direct
+        targets reference existing outputs.
+
+        Raises
+        ------
+        InvalidSchemaError
+            If any validation check fails.
+        """
         if not self.name:
             raise InvalidSchemaError("Project name cannot be empty")
         if not self.inputs:
@@ -126,7 +241,25 @@ class Project:
                 )
 
     def validate_inputs(self, inputs: dict[str, float | str]) -> None:
-        """Validate input values against schema."""
+        """Validate input values against the project schema.
+
+        Checks that all required inputs are provided, no extra inputs are given,
+        and each value is valid for its input type (within bounds for continuous,
+        in valid levels for categorical).
+
+        Parameters
+        ----------
+        inputs : dict[str, float | str]
+            Input values to validate. Keys are input names, values are numeric
+            (for continuous) or string (for categorical).
+
+        Raises
+        ------
+        InvalidInputError
+            If required inputs are missing, unexpected inputs are provided,
+            numeric values are outside bounds, or categorical values are not
+            in the valid levels.
+        """
         expected = {inp.name for inp in self.inputs}
         provided = set(inputs.keys())
 
@@ -157,7 +290,22 @@ class Project:
                     )
 
     def validate_outputs(self, outputs: dict[str, float]) -> None:
-        """Validate output values against schema."""
+        """Validate output values against the project schema.
+
+        Checks that all required outputs are provided, no extra outputs are given,
+        and all values are numeric.
+
+        Parameters
+        ----------
+        outputs : dict[str, float]
+            Output values to validate. Keys are output names, values are numeric.
+
+        Raises
+        ------
+        InvalidOutputError
+            If required outputs are missing, unexpected outputs are provided,
+            or values are not numeric.
+        """
         expected = {out.name for out in self.outputs}
         provided = set(outputs.keys())
 
@@ -177,19 +325,50 @@ class Project:
                 )
 
     def get_input_names(self) -> list[str]:
-        """Return list of input names."""
+        """Return list of input variable names in definition order.
+
+        Returns
+        -------
+        list[str]
+            Names of all input variables.
+        """
         return [inp.name for inp in self.inputs]
 
     def get_output_names(self) -> list[str]:
-        """Return list of output names."""
+        """Return list of output variable names in definition order.
+
+        Returns
+        -------
+        list[str]
+            Names of all output variables.
+        """
         return [out.name for out in self.outputs]
 
     def get_bounds(self) -> list[tuple[float, float]]:
-        """Return bounds for continuous inputs, in order."""
+        """Return bounds for continuous inputs in definition order.
+
+        Categorical inputs are excluded since they don't have numeric bounds.
+
+        Returns
+        -------
+        list[tuple[float, float]]
+            List of (lower, upper) bound tuples for each continuous input.
+        """
         return [inp.bounds for inp in self.inputs if inp.type == "continuous"]
 
     def get_target(self) -> DirectTarget | RatioTarget | DifferenceTarget | SlopeTarget:
-        """Return the appropriate target instance based on target_config."""
+        """Create the appropriate target instance based on target_config.
+
+        Returns
+        -------
+        DirectTarget | RatioTarget | DifferenceTarget | SlopeTarget
+            Target instance configured according to target_config.
+
+        Raises
+        ------
+        ValueError
+            If target_config.target_type is not a recognized type.
+        """
         config = self.target_config
         if config.target_type == "direct":
             return DirectTarget(config.name, config.mode)
@@ -205,7 +384,30 @@ class Project:
     def get_training_data(
         self, observations: list["Observation"]
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Extract training data from observations."""
+        """Extract training data arrays from observations.
+
+        Converts observations into (X, y) arrays suitable for model training.
+        Automatically filters out failed observations and those with missing
+        target values.
+
+        Parameters
+        ----------
+        observations : list[Observation]
+            Observations to extract training data from.
+
+        Returns
+        -------
+        X : np.ndarray, shape (n_valid, n_inputs)
+            Input values for valid observations. Columns are in input definition order.
+        y : np.ndarray, shape (n_valid,)
+            Target values computed from valid observations.
+
+        Notes
+        -----
+        Observations are excluded from training data if:
+        - The observation is marked as failed (obs.failed is True)
+        - The target value cannot be computed (returns None)
+        """
         target = self.get_target()
         input_names = [inp.name for inp in self.inputs]
         X_rows = []
