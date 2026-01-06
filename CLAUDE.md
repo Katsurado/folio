@@ -4,7 +4,21 @@
 
 Folio is an open-source electronic lab notebook with intelligent experiment suggestions for chemistry labs. Human-in-the-loop MVP, with architecture enabling closed-loop automation later.
 
-Target users: lab scientists who know some Python but aren't software engineers.
+Target users: lab scientists. No coding required (GUI), but API available for those who want it.
+
+## MVP Scope
+
+Three pillars, all required:
+1. **ELN**: Create projects, record observations (CRUD), attach images, document procedures/hazards
+2. **PDF Export**: Quarto-based, professional lab notebook output
+3. **BO Suggestions**: Smart next-experiment recommendations
+
+Two interfaces:
+- **Streamlit GUI**: Full workflow for non-coders
+- **Python API**: Same functionality for Jupyter/Quarto power users
+
+Plus:
+- **Documentation**: Proper docstrings (NumPy-style) on all public and internal functions
 
 ## Architecture
 
@@ -23,8 +37,8 @@ src/folio/
 
 ## Key Abstractions
 
-- **Project**: Experiment schema (inputs, outputs, target config, recommender config)
-- **Observation**: Single data point (inputs dict, outputs dict, timestamp, notes, tag, raw_data_path)
+- **Project**: Experiment schema (inputs, outputs, target config, recommender config, procedure, hazards)
+- **Observation**: Single data point (inputs dict, outputs dict, timestamp, notes, tag, images, failed)
 - **Target**: Extracts scalar optimization target from Observation (direct or derived from outputs)
 - **Recommender**: Suggests next experiments. Implementations: BORecommender, RandomRecommender, GridRecommender
 - **Surrogate**: Model that fits observations. Interface: fit(X, y), predict(X) → (mean, std)
@@ -52,7 +66,7 @@ User enters observation (inputs, outputs)
 - Python 3.10+
 - Type hints on all public functions
 - Use modern syntax: `dict` not `Dict`, `str | None` not `Optional[str]`
-- Docstrings: Google style, one line if possible
+- Docstrings: NumPy-style, thorough on both public and internal functions
 - Format: black (line length 88)
 - Lint: ruff
 - Tests: pytest, mirror src/ structure in tests/
@@ -76,42 +90,42 @@ User enters observation (inputs, outputs)
 
 ## Docstrings
 
-- One line if possible, elaborate only if non-obvious
-- Never start with "This function..."
-- Don't repeat type hints in prose
-- For algorithms: name it and cite, don't explain the math in docstring
+Write thorough NumPy-style docstrings. Good documentation is not slop.
 
 ```python
 # Good
 def expected_improvement(X: np.ndarray, surrogate: Surrogate, best_y: float) -> np.ndarray:
     """Compute Expected Improvement scores for candidate points.
 
+    Parameters
+    ----------
+    X : np.ndarray, shape (n_candidates, n_features)
+        Candidate points to evaluate.
+    surrogate : Surrogate
+        Fitted surrogate model with predict(X) -> (mean, std).
+    best_y : float
+        Best observed target value so far.
+
+    Returns
+    -------
+    np.ndarray, shape (n_candidates,)
+        EI score for each candidate point.
+
     Reference: Jones et al. (1998), Efficient Global Optimization.
-    """
-
-# Bad
-def expected_improvement(X, surrogate, best_y):
-    """
-    This function computes the Expected Improvement acquisition function.
-
-    Expected Improvement is defined as EI(x) = E[max(f(x) - f(x*), 0)]...
-    [200 more words]
-
-    Args:
-        X: The candidate points to evaluate (this is a numpy array).
     """
 ```
 
 ## Anti-Slop Rules
 
-1. Docstrings: one line if possible
-2. No "This function..." or "This method..."
-3. Don't repeat type hints in docstring prose
-4. No comments that restate the code
-5. No trailing comments, ever
-6. If a function needs 10+ lines of docstring, the function is too complex
-7. No unnecessary blank lines
-8. No over-engineering for hypothetical futures
+Slop = bad engineering, not verbose documentation.
+
+1. No comments that restate the code
+2. No trailing comments
+3. Consistent design patterns across modules
+4. Proper task decomposition — functions do one thing
+5. No over-engineering for hypothetical futures
+6. No catching broad `except Exception`
+7. No print() for debugging
 
 ## Error Handling
 
@@ -139,17 +153,31 @@ raise Exception("Project not found")
 ## Current State
 
 - [x] Project skeleton
-- [ ] Data layer (Project, Observation, SQLite CRUD)
-- [ ] Target interface
+- [x] Data layer (Project, Observation, SQLite CRUD)
+  - [x] Schema: InputSpec, OutputSpec, ConstantSpec with validation
+  - [x] Observation with validation, timestamp default, failed flag
+  - [x] Project with TargetConfig, RecommenderConfig, validation
+  - [x] Database: create/get/delete project, add/get observations
+  - [x] Project.get_training_data() extracts X, y arrays from observations
+- [x] Target interface
+  - [x] ScalarTarget abstract base class (folio/targets/base.py)
+  - [x] DirectTarget: extracts single output value
+  - [x] DerivedTarget: computes via custom function
+  - [x] RatioTarget: numerator / denominator
+  - [x] DifferenceTarget: first - second
+  - [x] DistanceTarget: euclidean/mse/mae distance to target values
+  - [x] SlopeTarget: linear fit slope across multiple outputs
 - [ ] Recommender interface
 - [ ] Surrogate interface + GP implementation
 - [ ] Acquisition interface + EI/UCB implementation
 - [ ] BORecommender
 - [ ] RandomRecommender, GridRecommender
 - [ ] Executor interface + HumanExecutor
-- [ ] CLI/API (create_project, record, suggest_next, to_dataframe)
-- [ ] Export to qmd
+- [ ] Export to PDF via Quarto
 - [ ] Streamlit UI
+- [ ] Add images field to Observation
+- [ ] Add procedure, hazards fields to Project
+- [ ] Proper docstrings on all functions (NumPy-style)
 
 ## Commands
 
@@ -168,10 +196,9 @@ black --check .            # check format without changing
 
 - Over-engineer for hypothetical future needs
 - Add dependencies without clear justification
-- Write verbose docstrings that repeat type hints
 - Use print() for debugging
 - Catch broad exceptions
 - Add trailing comments
-- Write obvious comments
+- Write comments that restate the code
 - Create deep inheritance hierarchies
 - Use abbreviations in variable names (except standard: i, j, n, X, y)
