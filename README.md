@@ -2,6 +2,8 @@
 
 An open-source electronic lab notebook with intelligent experiment suggestions.
 
+STILL BEING DEVELOPED, COMPLETE TIME TBD
+
 ## What is Folio?
 
 Folio helps lab scientists run experiments more efficiently. You record your experimental results, and Folio suggests what to try next using Bayesian optimization (or other methods you choose).
@@ -70,3 +72,11 @@ See [docs/](docs/) for full documentation.
 ## License
 
 MIT
+
+## Statement on AI
+Code in this project was written with assistance from generative AI models such as Claude. I have
+a working knowledge of programming and basic SWE practices, but I am a chemist first. AI assistance
+help briges the gap between "functional code in research labs" and "well-architechted code that is
+readable and maintainable", which is crucial for Folio to be a actually usable tool.
+
+All design decision and validation remain my own.
