@@ -1,7 +1,5 @@
 """Tests for surrogate model interface."""
 
-from typing import Self
-
 import numpy as np
 import pytest
 
@@ -22,13 +20,27 @@ class ConcreteSurrogate(Surrogate):
         self._y_train = None
         self._n_features = None
 
-    def fit(self, X: np.ndarray, y: np.ndarray) -> Self:
+    def fit(self, X: np.ndarray, y: np.ndarray) -> "ConcreteSurrogate":
         """Store training data and mark as fitted."""
-        raise NotImplementedError
+        if X.shape[0] != y.shape[0]:
+            raise ValueError("samples")
+
+        self._X_train = X
+        self._y_train = y
+        self._is_fitted = True
+        self._n_features = X.shape[1]
+
+        return self
 
     def predict(self, X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Return constant mean (training mean) and fixed std."""
-        raise NotImplementedError
+        if not self._is_fitted:
+            raise NotFittedError("fit")
+        if X.shape[1] != self._n_features:
+            raise ValueError("features")
+
+        n = X.shape[0]
+        return np.zeros(n), np.ones(n)
 
 
 class TestSurrogateABC:

@@ -1,7 +1,6 @@
 """Abstract base class for surrogate models."""
 
 from abc import ABC, abstractmethod
-from typing import Self
 
 import numpy as np
 
@@ -50,7 +49,7 @@ class Surrogate(ABC):
     ...     def __init__(self):
     ...         self._is_fitted = False
     ...
-    ...     def fit(self, X: np.ndarray, y: np.ndarray) -> Self:
+    ...     def fit(self, X: np.ndarray, y: np.ndarray) -> "Surrogate":
     ...         # Train model on X, y
     ...         self._is_fitted = True
     ...         return self
@@ -63,7 +62,7 @@ class Surrogate(ABC):
     """
 
     @abstractmethod
-    def fit(self, X: np.ndarray, y: np.ndarray) -> Self:
+    def fit(self, X: np.ndarray, y: np.ndarray) -> "Surrogate":
         """Fit the surrogate model to training data.
 
         Parameters
@@ -77,7 +76,7 @@ class Surrogate(ABC):
 
         Returns
         -------
-        Self
+        Surrogate
             Returns self for method chaining (sklearn convention).
 
         Raises
@@ -100,7 +99,7 @@ class Surrogate(ABC):
 
         >>> mean, std = surrogate.fit(X_train, y_train).predict(X_test)
         """
-        raise NotImplementedError
+        ...
 
     @abstractmethod
     def predict(self, X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -145,4 +144,4 @@ class Surrogate(ABC):
         >>> np.all(std >= 0)
         True
         """
-        raise NotImplementedError
+        ...
