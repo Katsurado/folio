@@ -1,12 +1,14 @@
 """Built-in target implementations."""
 
 from collections.abc import Callable
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
-from folio.core.observation import Observation
 from folio.targets.base import ScalarTarget
+
+if TYPE_CHECKING:
+    from folio.core.observation import Observation
 
 
 class DirectTarget(ScalarTarget):
@@ -33,7 +35,7 @@ class DirectTarget(ScalarTarget):
         self.output_name = output_name
         self.objective = objective
 
-    def compute(self, obs: Observation) -> float | None:
+    def compute(self, obs: "Observation") -> float | None:
         """Extract the output value from an observation.
 
         Parameters
@@ -81,7 +83,7 @@ class DerivedTarget(ScalarTarget):
         self.func = func
         self.objective = objective
 
-    def compute(self, obs: Observation) -> float | None:
+    def compute(self, obs: "Observation") -> float | None:
         """Compute the target value using the custom function.
 
         Parameters
@@ -153,7 +155,7 @@ class DistanceTarget(ScalarTarget):
         """
         self.target = values
 
-    def compute(self, obs: Observation) -> float | None:
+    def compute(self, obs: "Observation") -> float | None:
         """Compute distance from observation outputs to target values.
 
         Parameters
@@ -243,7 +245,7 @@ class RatioTarget(ScalarTarget):
         self.denominator = denominator
         self.objective = objective
 
-    def compute(self, obs: Observation) -> float | None:
+    def compute(self, obs: "Observation") -> float | None:
         """Compute the ratio of numerator to denominator outputs.
 
         Parameters
@@ -298,7 +300,7 @@ class DifferenceTarget(ScalarTarget):
         self.second = second
         self.objective = objective
 
-    def compute(self, obs: Observation) -> float | None:
+    def compute(self, obs: "Observation") -> float | None:
         """Compute the difference: first - second.
 
         Parameters
@@ -372,7 +374,7 @@ class SlopeTarget(ScalarTarget):
         self.x_values = x_values
         self.objective = objective
 
-    def compute(self, obs: Observation) -> float | None:
+    def compute(self, obs: "Observation") -> float | None:
         """Compute the slope of a linear fit to the output values.
 
         Parameters

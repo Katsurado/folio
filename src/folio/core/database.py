@@ -9,8 +9,9 @@ from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 
+from folio.core.config import RecommenderConfig, TargetConfig
 from folio.core.observation import Observation
-from folio.core.project import Project, RecommenderConfig, TargetConfig
+from folio.core.project import Project
 from folio.core.schema import InputSpec, OutputSpec
 from folio.exceptions import ProjectExistsError, ProjectNotFoundError
 

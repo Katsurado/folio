@@ -1,9 +1,10 @@
 """Abstract base class for optimization targets."""
 
 from abc import ABC, abstractmethod
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from folio.core.observation import Observation
+if TYPE_CHECKING:
+    from folio.core.observation import Observation
 
 
 class ScalarTarget(ABC):
@@ -33,14 +34,14 @@ class ScalarTarget(ABC):
     ...         self.output_name = output_name
     ...         self.objective = objective
     ...
-    ...     def compute(self, obs: Observation) -> float | None:
+    ...     def compute(self, obs: "Observation") -> float | None:
     ...         return obs.outputs.get(self.output_name)
     """
 
     objective: Literal["maximize", "minimize"]
 
     @abstractmethod
-    def compute(self, obs: Observation) -> float | None:
+    def compute(self, obs: "Observation") -> float | None:
         """Extract scalar target value from an observation.
 
         Parameters

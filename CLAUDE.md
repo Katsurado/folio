@@ -74,16 +74,27 @@ Developer fills in implementation. Tests tell you when you're done.
 
 ```
 src/folio/
-├── core/           # Project, Observation, database
-├── recommenders/   # Recommender interface + implementations (BO, random, grid)
-│   └── acquisitions/  # Acquisition functions (EI, UCB) - internal to recommenders
-├── surrogates/     # Surrogate interface + implementations (GP, etc.)
-├── targets/        # Target interface (direct, derived)
-├── executors/      # Executor interface (HumanExecutor, ClaudeLightExecutor)
-├── ui/             # Streamlit app
-├── api.py          # High-level user-facing functions
-└── exceptions.py   # Custom exceptions
+├── core/
+│   ├── config.py       # TargetConfig, RecommenderConfig (no circular deps)
+│   ├── schema.py       # InputSpec, OutputSpec
+│   ├── observation.py  # Observation dataclass
+│   ├── project.py      # Project dataclass
+│   └── database.py     # SQLite CRUD operations
+├── recommenders/       # Recommender interface + implementations (BO, random, grid)
+│   └── acquisitions/   # Acquisition functions (EI, UCB) - internal to recommenders
+├── surrogates/
+│   ├── base.py         # Surrogate ABC
+│   └── gp.py           # GPSurrogate (BoTorch)
+├── targets/
+│   ├── base.py         # ScalarTarget ABC
+│   └── builtin.py      # DirectTarget, RatioTarget, etc.
+├── executors/          # Executor interface (HumanExecutor, ClaudeLightExecutor)
+├── ui/                 # Streamlit app
+├── api.py              # High-level user-facing functions
+└── exceptions.py       # Custom exceptions
 ```
+
+Note: `targets/` uses `TYPE_CHECKING` for `Observation` imports to avoid circular dependencies with `core/`.
 
 ## Key Abstractions
 
@@ -255,11 +266,13 @@ raise Exception("Project not found")
   - [x] DifferenceTarget: first - second
   - [x] DistanceTarget: euclidean/mse/mae distance to target values
   - [x] SlopeTarget: linear fit slope across multiple outputs
+- [x] Surrogate interface
+  - [x] Surrogate ABC with fit/predict (folio/surrogates/base.py)
+  - [ ] GPSurrogate implementation (tests written, implementation pending)
 - [ ] Add images field to Observation
 - [ ] Add procedure, hazards fields to Project
 - [ ] libSQL cloud sync support in Database
 - [ ] Recommender interface
-- [ ] Surrogate interface + GP implementation
 - [ ] Acquisition interface + EI/UCB implementation
 - [ ] BORecommender
 - [ ] RandomRecommender, GridRecommender

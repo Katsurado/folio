@@ -1,5 +1,6 @@
 """Core data models and database operations."""
 
+from folio.core.config import RecommenderConfig, TargetConfig
 from folio.core.database import (
     add_observation,
     count_observations,
@@ -14,7 +15,7 @@ from folio.core.database import (
     list_projects,
 )
 from folio.core.observation import Observation
-from folio.core.project import Project, RecommenderConfig, TargetConfig
+from folio.core.project import Project
 from folio.core.schema import InputSpec, OutputSpec
 
 __all__ = [
