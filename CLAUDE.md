@@ -76,8 +76,8 @@ Developer fills in implementation. Tests tell you when you're done.
 src/folio/
 ├── core/           # Project, Observation, database
 ├── recommenders/   # Recommender interface + implementations (BO, random, grid)
+│   └── acquisitions/  # Acquisition functions (EI, UCB) - internal to recommenders
 ├── surrogates/     # Surrogate interface + implementations (GP, etc.)
-├── acquisitions/   # Acquisition interface + implementations (EI, UCB)
 ├── targets/        # Target interface (direct, derived)
 ├── executors/      # Executor interface (HumanExecutor, ClaudeLightExecutor)
 ├── ui/             # Streamlit app
@@ -92,7 +92,7 @@ src/folio/
 - **Target**: Extracts scalar optimization target from Observation (direct or derived from outputs)
 - **Recommender**: Suggests next experiments. Implementations: BORecommender, RandomRecommender, GridRecommender
 - **Surrogate**: Model that fits observations. Interface: fit(X, y), predict(X) → (mean, std)
-- **Acquisition**: Scores candidate points. Interface: evaluate(X, surrogate, best_y) → scores
+- **Acquisition**: Scores candidate points (internal to recommenders). Interface: evaluate(X, surrogate, best_y) → scores
 - **Executor**: Runs experiments. HumanExecutor for manual, ClaudeLightExecutor for autonomous closed-loop
 
 ## Executor Interface

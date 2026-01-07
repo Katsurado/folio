@@ -35,3 +35,18 @@ class RecommenderError(FolioError):
 
 class SurrogateError(FolioError):
     """Raised when surrogate model fails."""
+
+
+class NotFittedError(SurrogateError):
+    """Raised when predict is called on an unfitted surrogate.
+
+    This error indicates that the surrogate model's `fit` method must be
+    called with training data before `predict` can be used.
+
+    Examples
+    --------
+    >>> surrogate = GPSurrogate()
+    >>> surrogate.predict(X_test)  # Raises NotFittedError
+    NotFittedError: This GPSurrogate instance is not fitted yet. Call 'fit'
+    with training data before using 'predict'.
+    """

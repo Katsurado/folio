@@ -68,4 +68,6 @@ testpaths = ["tests"]
 addopts = "-v"
 
 [tool.ruff.lint]
-ignore = ["N806"]
+# N803: Allow uppercase X for ML convention (feature matrices)
+# N806: Allow uppercase variable names in functions
+ignore = ["N803", "N806"]
