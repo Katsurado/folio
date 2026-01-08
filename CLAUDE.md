@@ -6,6 +6,38 @@ Folio is an open-source electronic lab notebook with intelligent experiment sugg
 
 Target users: lab scientists. No coding required (GUI), but API available for those who want it.
 
+## High-Level Architecture: Three Bishops
+
+Folio uses a "King and Three Bishops" architecture for clear separation of concerns:
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Folio (API)                          │
+│                          King                               │
+│         Top-level orchestrator, user's entry point          │
+└─────────────────────────────┬───────────────────────────────┘
+                              │
+        ┌─────────────────────┼─────────────────────┐
+        ▼                     ▼                     ▼
+┌───────────────┐     ┌───────────────┐     ┌───────────────┐
+│   Project     │     │  Recommender  │     │   Executor    │
+│    (ELN)      │     │     (BO)      │     │  (Automation) │
+│   Bishop 1    │     │   Bishop 2    │     │   Bishop 3    │
+├───────────────┤     ├───────────────┤     ├───────────────┤
+│ Schema        │     │ Surrogate     │     │ HumanExecutor │
+│ Observations  │     │ Acquisition   │     │ ClaudeLight   │
+│ Validation    │     │ KABO          │     │ Opentrons     │
+│ Export        │     │ Batch BO      │     │ Custom APIs   │
+│ LLM search    │     │ Active learn  │     │               │
+│ Cloud sync    │     │               │     │               │
+│ Dashboards    │     │               │     │               │
+│ Safety checks │     │               │     │               │
+└───────────────┘     └───────────────┘     └───────────────┘
+      Data               Intelligence           Action
+  "what happened"       "what to try"         "run it"
+```
+
+**Shared utilities:** `targets/` and `surrogates/` are top-level modules used by multiple bishops (Project uses targets for training data extraction; Recommender uses surrogates for modeling; both can be used standalone for visualization/analysis).
+
 ## MVP Scope
 
 Three pillars, all required:
