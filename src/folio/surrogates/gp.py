@@ -62,6 +62,8 @@ class SingleTaskGPSurrogate(Surrogate):
         The fitted BoTorch GP model. None before fit() is called.
     n_features : int or None
         Number of input features. Set after fit().
+    _is_fitted : bool
+        Internal flag tracking whether fit() has been called.
 
     Examples
     --------
@@ -129,6 +131,8 @@ class SingleTaskGPSurrogate(Surrogate):
         ValueError
             If nu not in {0.5, 1.5, 2.5}.
         """
+        super().__init__()
+
         if kernel not in {"matern", "rbf"}:
             raise ValueError(
                 f"Unknown kernel: {kernel}. Kernel should be 'matern' or 'rbf'"
@@ -230,6 +234,7 @@ class SingleTaskGPSurrogate(Surrogate):
         mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
         fit_gpytorch_mll(mll)
 
+        self._is_fitted = True
         return self
 
     def predict(self, X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -279,7 +284,7 @@ class SingleTaskGPSurrogate(Surrogate):
         """
         X = X[:, np.newaxis] if X.ndim == 1 else X
 
-        if self.model is None:
+        if not self._is_fitted:
             raise NotFittedError("Call fit() first before predict()")
         if X.shape[1] != self.n_features:
             raise ValueError(

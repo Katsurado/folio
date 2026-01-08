@@ -26,6 +26,7 @@ class Surrogate(ABC):
     -----
     Subclasses must:
 
+    - Call `super().__init__()` in their `__init__` method
     - Implement `fit` to train on observations and return `self`
     - Implement `predict` to return (mean, std) arrays
     - Raise `NotFittedError` if `predict` is called before `fit`
@@ -47,7 +48,7 @@ class Surrogate(ABC):
 
     >>> class MySurrogate(Surrogate):
     ...     def __init__(self):
-    ...         self._is_fitted = False
+    ...         super().__init__()
     ...
     ...     def fit(self, X: np.ndarray, y: np.ndarray) -> "Surrogate":
     ...         # Train model on X, y
@@ -60,6 +61,10 @@ class Surrogate(ABC):
     ...         # Return predictions
     ...         return mean, std
     """
+
+    def __init__(self):
+        """Initialize the surrogate with unfitted state."""
+        self._is_fitted = False
 
     @abstractmethod
     def fit(self, X: np.ndarray, y: np.ndarray) -> "Surrogate":

@@ -15,7 +15,7 @@ class ConcreteSurrogate(Surrogate):
     """
 
     def __init__(self):
-        self._is_fitted = False
+        super().__init__()
         self._X_train = None
         self._y_train = None
         self._n_features = None
