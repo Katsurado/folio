@@ -249,6 +249,30 @@ raise Exception("Project not found")
 - Use pytest fixtures for common setup (database, sample project)
 - Test edge cases: empty inputs, invalid bounds, etc.
 
+### Error Message Matching
+
+When testing that exceptions are raised with specific messages, be FLEXIBLE:
+- Use multiple alternative keywords with `|` (e.g., `match="negative|non-negative|must be >= 0"`)
+- Use case-insensitive matching with `(?i)` (e.g., `match="(?i)invalid"`)
+- Match on semantic meaning, not exact wording
+- The implementer should have freedom to phrase error messages naturally
+
+```python
+# Good - flexible matching
+with pytest.raises(ValueError, match="shape|dimension|size"):
+    ...
+
+with pytest.raises(ValueError, match="(?i)nan|missing|invalid"):
+    ...
+
+with pytest.raises(ValueError, match="negative|non-negative|>= 0|must be positive"):
+    ...
+
+# Bad - brittle exact matching
+with pytest.raises(ValueError, match="Array shapes must match exactly"):
+    ...
+```
+
 ## Current State
 
 - [x] Project skeleton
