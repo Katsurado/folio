@@ -293,11 +293,14 @@ with pytest.raises(ValueError, match="Array shapes must match exactly"):
 - [x] Surrogate interface
   - [x] Surrogate ABC with fit/predict (folio/surrogates/base.py)
   - [x] SingleTaskGPSurrogate: BoTorch-based single-output GP (Matérn 2.5, ARD, learned noise)
+- [x] Acquisition interface
+  - [x] Acquisition ABC with evaluate/_compute (folio/recommenders/acquisitions/base.py)
+  - [x] ExpectedImprovement: EI with xi parameter, handles maximize/minimize
+  - [x] UpperConfidenceBound: UCB with beta parameter, handles maximize/minimize
 - [ ] Add images field to Observation
 - [ ] Add procedure, hazards fields to Project
 - [ ] libSQL cloud sync support in Database
 - [ ] Recommender interface
-- [ ] Acquisition interface + EI/UCB implementation
 - [ ] BORecommender
 - [ ] RandomRecommender, GridRecommender
 - [ ] Executor interface
@@ -318,6 +321,15 @@ ruff check . --fix         # lint and auto-fix
 black .                    # format
 black --check .            # check format without changing
 ```
+
+## Debugging Errors
+
+When asked to review error messages or debug issues:
+1. **Explain what the error is** — describe the root cause clearly
+2. **Ask before showing the fix** — don't immediately provide code; ask "Want me to show the fix?"
+3. Let the developer attempt the fix themselves if they prefer
+
+This encourages learning and avoids spoon-feeding solutions.
 
 ## Do NOT
 
