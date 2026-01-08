@@ -3,6 +3,7 @@
 from typing import Literal
 
 import numpy as np
+from scipy.stats import norm
 
 from folio.recommenders.acquisitions.base import Acquisition
 
@@ -67,7 +68,9 @@ class ExpectedImprovement(Acquisition):
         ValueError
             If xi is negative.
         """
-        raise NotImplementedError
+        if xi < 0:
+            raise ValueError("xi must be non-negative")
+        self.xi = xi
 
     def _compute(
         self,
@@ -102,7 +105,18 @@ class ExpectedImprovement(Acquisition):
         For points with std=0, returns 0 (no expected improvement when there
         is no uncertainty).
         """
-        raise NotImplementedError
+        if objective == "maximize":
+            improvement = mean - y_best - self.xi
+        else:
+            improvement = y_best - mean - self.xi
+
+        Z = np.zeros_like(std)
+        np.divide(improvement, std, out=Z, where=std > 0)
+
+        ei = improvement * norm.cdf(Z) + std * norm.pdf(Z)
+
+        ei = np.where(std == 0, 0.0, ei)
+        return ei
 
 
 class UpperConfidenceBound(Acquisition):
@@ -161,7 +175,9 @@ class UpperConfidenceBound(Acquisition):
         ValueError
             If beta is negative.
         """
-        raise NotImplementedError
+        if beta < 0:
+            raise ValueError("beta must be non-negative")
+        self.beta = beta
 
     def _compute(
         self,
@@ -191,4 +207,8 @@ class UpperConfidenceBound(Acquisition):
         np.ndarray, shape (n_candidates,)
             UCB scores. Higher values indicate more promising candidates.
         """
-        raise NotImplementedError
+        if objective == "maximize":
+            ucb = mean + self.beta * std
+        else:
+            ucb = -mean + self.beta * std
+        return ucb
