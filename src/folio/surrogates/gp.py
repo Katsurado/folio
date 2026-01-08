@@ -3,23 +3,29 @@
 from typing import Literal
 
 import numpy as np
+import torch
+from botorch.fit import fit_gpytorch_mll
+from botorch.models import SingleTaskGP
+from botorch.models.transforms.input import Normalize
+from botorch.models.transforms.outcome import Standardize
+from gpytorch.kernels import MaternKernel, RBFKernel, ScaleKernel
+from gpytorch.mlls import ExactMarginalLogLikelihood
 
+from folio.exceptions import NotFittedError
 from folio.surrogates.base import Surrogate
 
 
-class GPSurrogate(Surrogate):
-    """Gaussian Process surrogate model using BoTorch's SingleTaskGP.
+class SingleTaskGPSurrogate(Surrogate):
+    """Single-output Gaussian Process surrogate using BoTorch's SingleTaskGP.
 
     This surrogate wraps BoTorch's SingleTaskGP to provide a scikit-learn-style
     interface for Bayesian optimization. Supports configurable kernels and
-    automatic input/output normalization.
+    automatic input/output normalization. Use this for scalar optimization
+    targets; for multi-output or mixed-task scenarios, use specialized GP
+    surrogates (e.g., MultiTaskGP, HOGP).
 
     Parameters
     ----------
-    noise : float, default=1e-4
-        Observation noise variance added to the diagonal of the kernel matrix.
-        Small positive values improve numerical stability. Larger values indicate
-        more noisy observations.
     kernel : {"matern", "rbf"}, default="matern"
         Covariance kernel type:
         - "matern": Matérn kernel (smoothness controlled by `nu`)
@@ -42,8 +48,6 @@ class GPSurrogate(Surrogate):
 
     Attributes
     ----------
-    noise : float
-        The observation noise variance.
     kernel : str
         The kernel type ("matern" or "rbf").
     nu : float
@@ -65,15 +69,14 @@ class GPSurrogate(Surrogate):
 
     >>> X_train = np.array([[0.0], [0.25], [0.5], [0.75], [1.0]])
     >>> y_train = np.sin(2 * np.pi * X_train).ravel()
-    >>> gp = GPSurrogate()
+    >>> gp = SingleTaskGPSurrogate()
     >>> gp.fit(X_train, y_train)
-    <GPSurrogate object>
+    <SingleTaskGPSurrogate object>
     >>> mean, std = gp.predict(np.array([[0.125], [0.375]]))
 
     Custom configuration:
 
-    >>> gp = GPSurrogate(
-    ...     noise=1e-3,
+    >>> gp = SingleTaskGPSurrogate(
     ...     kernel="rbf",
     ...     ard=False,
     ...     normalize_inputs=False,
@@ -81,12 +84,12 @@ class GPSurrogate(Surrogate):
 
     Rough Matérn kernel for non-smooth functions:
 
-    >>> gp = GPSurrogate(kernel="matern", nu=0.5)
+    >>> gp = SingleTaskGPSurrogate(kernel="matern", nu=0.5)
 
     Notes
     -----
-    The GP hyperparameters (lengthscales, outputscale) are optimized during
-    fit() using L-BFGS-B to maximize the marginal log-likelihood.
+    The GP hyperparameters (lengthscales, outputscale, noise) are optimized
+    during fit() using L-BFGS-B to maximize the marginal log-likelihood.
 
     References
     ----------
@@ -98,19 +101,16 @@ class GPSurrogate(Surrogate):
 
     def __init__(
         self,
-        noise: float = 1e-4,
         kernel: Literal["matern", "rbf"] = "matern",
         nu: float = 2.5,
         ard: bool = True,
         normalize_inputs: bool = True,
         normalize_outputs: bool = True,
     ):
-        """Initialize the GP surrogate.
+        """Initialize the single-task GP surrogate.
 
         Parameters
         ----------
-        noise : float, default=1e-4
-            Observation noise variance. Must be non-negative.
         kernel : {"matern", "rbf"}, default="matern"
             Covariance kernel type.
         nu : float, default=2.5
@@ -125,15 +125,25 @@ class GPSurrogate(Surrogate):
         Raises
         ------
         ValueError
-            If noise is negative.
+            If kernel not in {"matern", "rbf"}.
         ValueError
-            If kernel is not "matern" or "rbf".
-        ValueError
-            If nu is not one of 0.5, 1.5, or 2.5.
+            If nu not in {0.5, 1.5, 2.5}.
         """
-        raise NotImplementedError
+        if kernel not in {"matern", "rbf"}:
+            raise ValueError(
+                f"Unknown kernel: {kernel}. Kernel should be 'matern' or 'rbf'"
+            )
+        if nu not in {0.5, 1.5, 2.5}:
+            raise ValueError(f"Invalid nu: {nu}. nu should be in {0.5, 1.5, 2.5}")
 
-    def fit(self, X: np.ndarray, y: np.ndarray) -> "GPSurrogate":
+        self.kernel = kernel
+        self.nu = nu
+        self.ard = ard
+        self.normalize_inputs = normalize_inputs
+        self.normalize_outputs = normalize_outputs
+        self.model = None
+
+    def fit(self, X: np.ndarray, y: np.ndarray) -> "SingleTaskGPSurrogate":
         """Fit the Gaussian Process model to training data.
 
         Converts numpy arrays to torch tensors, creates a SingleTaskGP model,
@@ -148,15 +158,15 @@ class GPSurrogate(Surrogate):
 
         Returns
         -------
-        GPSurrogate
+        SingleTaskGPSurrogate
             Returns self for method chaining.
 
         Raises
         ------
         ValueError
-            If X and y have incompatible shapes (different number of samples).
+            If X.shape[0] != y.shape[0] (different number of samples).
         ValueError
-            If X has fewer than 1 sample.
+            If X.shape[0] < 1 (no training samples).
 
         Notes
         -----
@@ -169,14 +179,58 @@ class GPSurrogate(Surrogate):
 
         Examples
         --------
-        >>> gp = GPSurrogate()
+        >>> gp = SingleTaskGPSurrogate()
         >>> gp.fit(X_train, y_train)
-        <GPSurrogate object>
+        <SingleTaskGPSurrogate object>
 
         >>> # Method chaining
-        >>> mean, std = GPSurrogate().fit(X_train, y_train).predict(X_test)
+        >>> mean, std = SingleTaskGPSurrogate().fit(X_train, y_train).predict(X_test)
         """
-        raise NotImplementedError
+        X = X[:, np.newaxis] if X.ndim == 1 else X
+
+        if X.shape[0] != y.shape[0]:
+            raise ValueError(
+                f"Number of samples ({X.shape[0]}) "
+                f"should match number of labels ({y.shape[0]})"
+            )
+        if X.shape[0] < 1:
+            raise ValueError(f"Cannot fit model with {X.shape[0]} observations")
+
+        X = torch.tensor(X, dtype=torch.float64)
+        y = torch.tensor(y, dtype=torch.float64).unsqueeze(-1)
+
+        self.n_features = X.shape[1]
+        ard_features = self.n_features if self.ard else None
+
+        if self.kernel == "matern":
+            base_kernel = MaternKernel(nu=self.nu, ard_num_dims=ard_features)
+        else:
+            base_kernel = RBFKernel(ard_num_dims=ard_features)
+
+        covar_module = ScaleKernel(base_kernel)
+
+        if self.normalize_inputs:
+            input_transform = Normalize(d=self.n_features)
+        else:
+            input_transform = None
+
+        if self.normalize_outputs:
+            output_transform = Standardize(m=1)
+        else:
+            output_transform = None
+
+        self.model = SingleTaskGP(
+            train_X=X,
+            train_Y=y,
+            covar_module=covar_module,
+            input_transform=input_transform,
+            outcome_transform=output_transform,
+        )
+
+        mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
+        fit_gpytorch_mll(mll)
+
+        return self
 
     def predict(self, X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Predict mean and standard deviation at candidate points.
@@ -203,7 +257,7 @@ class GPSurrogate(Surrogate):
         NotFittedError
             If called before fit(). Must fit the model first.
         ValueError
-            If X has wrong number of features (doesn't match training data).
+            If X.shape[1] != n_features (feature dimension mismatch).
 
         Notes
         -----
@@ -216,11 +270,31 @@ class GPSurrogate(Surrogate):
 
         Examples
         --------
-        >>> gp = GPSurrogate().fit(X_train, y_train)
+        >>> gp = SingleTaskGPSurrogate().fit(X_train, y_train)
         >>> mean, std = gp.predict(X_test)
         >>> mean.shape
         (10,)
         >>> np.all(std >= 0)
         True
         """
-        raise NotImplementedError
+        X = X[:, np.newaxis] if X.ndim == 1 else X
+
+        if self.model is None:
+            raise NotFittedError("Call fit() first before predict()")
+        if X.shape[1] != self.n_features:
+            raise ValueError(
+                f"Feature dimention mismatch: "
+                f"fitted with {self.n_features} features, "
+                f"but passed in new data with {X.shape[1]} features"
+            )
+
+        X = torch.tensor(X, dtype=torch.float64)
+
+        posterior = self.model.posterior(X)
+        mean = posterior.mean
+        std = posterior.variance.sqrt()
+
+        mean = mean.squeeze(-1).detach().numpy()
+        std = std.squeeze(-1).detach().numpy()
+
+        return mean, std

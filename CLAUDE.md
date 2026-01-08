@@ -84,7 +84,7 @@ src/folio/
 │   └── acquisitions/   # Acquisition functions (EI, UCB) - internal to recommenders
 ├── surrogates/
 │   ├── base.py         # Surrogate ABC
-│   └── gp.py           # GPSurrogate (BoTorch)
+│   └── gp.py           # SingleTaskGPSurrogate (BoTorch, single-output GP)
 ├── targets/
 │   ├── base.py         # ScalarTarget ABC
 │   └── builtin.py      # DirectTarget, RatioTarget, etc.
@@ -102,7 +102,7 @@ Note: `targets/` uses `TYPE_CHECKING` for `Observation` imports to avoid circula
 - **Observation**: Single data point (inputs dict, outputs dict, timestamp, notes, tag, images, failed)
 - **Target**: Extracts scalar optimization target from Observation (direct or derived from outputs)
 - **Recommender**: Suggests next experiments. Implementations: BORecommender, RandomRecommender, GridRecommender
-- **Surrogate**: Model that fits observations. Interface: fit(X, y), predict(X) → (mean, std)
+- **Surrogate**: Model that fits observations. Interface: fit(X, y), predict(X) → (mean, std). SingleTaskGPSurrogate for scalar targets.
 - **Acquisition**: Scores candidate points (internal to recommenders). Interface: evaluate(X, surrogate, best_y) → scores
 - **Executor**: Runs experiments. HumanExecutor for manual, ClaudeLightExecutor for autonomous closed-loop
 
@@ -268,7 +268,7 @@ raise Exception("Project not found")
   - [x] SlopeTarget: linear fit slope across multiple outputs
 - [x] Surrogate interface
   - [x] Surrogate ABC with fit/predict (folio/surrogates/base.py)
-  - [ ] GPSurrogate implementation (tests written, implementation pending)
+  - [x] SingleTaskGPSurrogate: BoTorch-based single-output GP (Matérn 2.5, ARD, learned noise)
 - [ ] Add images field to Observation
 - [ ] Add procedure, hazards fields to Project
 - [ ] libSQL cloud sync support in Database
