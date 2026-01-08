@@ -134,7 +134,7 @@ class SingleTaskGPSurrogate(Surrogate):
                 f"Unknown kernel: {kernel}. Kernel should be 'matern' or 'rbf'"
             )
         if nu not in {0.5, 1.5, 2.5}:
-            raise ValueError(f"Invalid nu: {nu}. nu should be in {0.5, 1.5, 2.5}")
+            raise ValueError(f"Invalid nu: {nu}. nu should be in {{0.5, 1.5, 2.5}}")
 
         self.kernel = kernel
         self.nu = nu
@@ -283,7 +283,7 @@ class SingleTaskGPSurrogate(Surrogate):
             raise NotFittedError("Call fit() first before predict()")
         if X.shape[1] != self.n_features:
             raise ValueError(
-                f"Feature dimention mismatch: "
+                f"Feature dimension mismatch: "
                 f"fitted with {self.n_features} features, "
                 f"but passed in new data with {X.shape[1]} features"
             )
