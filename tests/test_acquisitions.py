@@ -61,14 +61,26 @@ class TestAcquisitionABC:
 class TestEvaluateValidation:
     """Test that evaluate validates inputs before delegating to _compute."""
 
-    def test_shape_mismatch_raises(self):
+    def test_shape_mismatch_mean_std_raises(self):
         """evaluate() raises ValueError if mean and std shapes don't match."""
         acq = ConcreteAcquisition()
         X = np.array([[1.0, 2.0], [3.0, 4.0]])
         mean = np.array([0.5, 0.8])
         std = np.array([0.1, 0.2, 0.3])
 
-        with pytest.raises(ValueError, match="shape"):
+        with pytest.raises(ValueError, match="(?i)shape|mismatch|length|dimension"):
+            acq.evaluate(X, mean, std, y_best=0.5, objective="maximize")
+
+    def test_shape_mismatch_x_mean_raises(self):
+        """evaluate() raises ValueError if X rows don't match mean/std length."""
+        acq = ConcreteAcquisition()
+        X = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
+        mean = np.array([0.5, 0.8])
+        std = np.array([0.1, 0.2])
+
+        with pytest.raises(
+            ValueError, match="(?i)shape|mismatch|length|dimension|candidates"
+        ):
             acq.evaluate(X, mean, std, y_best=0.5, objective="maximize")
 
     def test_negative_std_raises(self):

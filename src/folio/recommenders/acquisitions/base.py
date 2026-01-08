@@ -25,6 +25,7 @@ class Acquisition(ABC):
 
     Validation performed by `evaluate`:
 
+    - `X.shape[0]` matches `len(mean)` and `len(std)`
     - `mean` and `std` have matching shapes
     - `std` values are non-negative
     - No NaN values in `mean` or `std`
@@ -97,6 +98,7 @@ class Acquisition(ABC):
         ValueError
             If validation fails:
 
+            - X.shape[0] doesn't match len(mean) or len(std)
             - mean and std shapes don't match
             - std contains negative values
             - mean or std contains NaN values
@@ -113,7 +115,37 @@ class Acquisition(ABC):
         >>> scores.shape
         (2,)
         """
-        raise NotImplementedError
+        self._validate(X, mean, std, y_best, objective)
+        return self._compute(X, mean, std, y_best, objective)
+
+    def _validate(
+        self,
+        X: np.ndarray,
+        mean: np.ndarray,
+        std: np.ndarray,
+        y_best: float,
+        objective: Literal["maximize", "minimize"],
+    ) -> None:
+        """validate inputs"""
+        mean_n = mean.shape[0]
+        std_n = std.shape[0]
+        X_n = X.shape[0]
+
+        if mean_n != std_n or mean_n != X_n:
+            raise ValueError(
+                f"shape mismatch: "
+                f"mean vector is length {mean_n} "
+                f"but std vector is length {std_n} "
+                f"and X have {X_n} rows"
+            )
+        if objective not in {"maximize", "minimize"}:
+            raise ValueError(f"Unknown objective: {objective}")
+        if np.isnan(mean).any() or np.isnan(std).any():
+            raise ValueError("NaNs encountered in mean/std")
+        if np.isinf(mean).any() or np.isinf(std).any():
+            raise ValueError("Infs encountered in mean/std")
+        if (std < 0).any():
+            raise ValueError("negative values of std")
 
     @abstractmethod
     def _compute(
