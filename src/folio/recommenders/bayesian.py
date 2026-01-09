@@ -11,7 +11,6 @@ from folio.recommenders.base import Recommender
 from folio.surrogates import MultiTaskGPSurrogate, SingleTaskGPSurrogate
 
 if TYPE_CHECKING:
-    from folio.core.observation import Observation
     from folio.core.project import Project
 
 
@@ -99,33 +98,8 @@ class BayesianRecommender(Recommender):
             The project defining the experiment schema and recommender
             configuration.
         """
-        raise NotImplementedError
-
-    def recommend(self, observations: list["Observation"]) -> dict[str, float]:
-        """Suggest next experiment inputs using Bayesian optimization.
-
-        Extracts training data from observations and delegates to
-        `recommend_from_data`. Returns random sample if fewer than
-        n_initial valid observations; otherwise uses GP + acquisition.
-
-        Parameters
-        ----------
-        observations : list[Observation]
-            Previous experiment observations. Failed observations are
-            automatically excluded from training data.
-
-        Returns
-        -------
-        dict[str, float]
-            Suggested input values for the next experiment.
-
-        Examples
-        --------
-        >>> recommender = BayesianRecommender(project)
-        >>> next_inputs = recommender.recommend(observations)
-        >>> project.validate_inputs(next_inputs)  # Should not raise
-        """
-        raise NotImplementedError
+        super().__init__(project)
+        self._surrogate = None
 
     def recommend_from_data(
         self,
@@ -146,8 +120,9 @@ class BayesianRecommender(Recommender):
             Training inputs from previous experiments.
         y : np.ndarray, shape (n_samples,)
             Training targets (scalar objective values).
-        bounds : np.ndarray, shape (n_features, 2)
-            Bounds for each input dimension. Each row is [lower, upper].
+        bounds : np.ndarray, shape (2, n_features)
+            Bounds for each input dimension. Row 0 contains lower bounds,
+            row 1 contains upper bounds (BoTorch format).
         objective : {"maximize", "minimize"}
             Optimization direction.
 
@@ -160,30 +135,8 @@ class BayesianRecommender(Recommender):
         --------
         >>> X = np.array([[0.2, 0.3], [0.5, 0.7], [0.8, 0.1]])
         >>> y = np.array([1.0, 2.0, 1.5])
-        >>> bounds = np.array([[0.0, 1.0], [0.0, 1.0]])
+        >>> bounds = np.array([[0.0, 0.0], [1.0, 1.0]])
         >>> next_x = recommender.recommend_from_data(X, y, bounds, "maximize")
-        """
-        raise NotImplementedError
-
-    def _random_sample(self) -> dict[str, float]:
-        """Generate a random sample within input bounds.
-
-        Returns
-        -------
-        dict[str, float]
-            Randomly sampled input values. Keys are input names, values
-            are floats uniformly sampled within each input's bounds.
-
-        Notes
-        -----
-        This method is called during the initial exploration phase when
-        there are fewer than n_initial observations.
-
-        Examples
-        --------
-        >>> recommender = BayesianRecommender(project)
-        >>> sample = recommender._random_sample()
-        >>> project.validate_inputs(sample)  # Should not raise
         """
         raise NotImplementedError
 

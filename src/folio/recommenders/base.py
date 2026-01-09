@@ -1,7 +1,7 @@
 """Abstract base class for experiment recommenders."""
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -122,7 +122,41 @@ class Recommender(ABC):
         >>> # Subsequent recommendation using observed data
         >>> next_inputs = recommender.recommend(observations)
         """
-        raise NotImplementedError
+        X, y = self.project.get_training_data(observations)
+        bounds = self.project.get_optimization_bounds()
+        objective = self.project.target_config.mode
+        candidate = self.recommend_from_data(X, y, bounds, objective)
+        names = [inp.name for inp in self.project.inputs if inp.type == "continuous"]
+
+        next_input = {names[i]: float(candidate[i]) for i in range(len(names))}
+
+        return next_input
+
+    @staticmethod
+    def random_sample_from_bounds(bounds: np.ndarray) -> np.ndarray:
+        """Sample uniformly at random within bounds.
+
+        Parameters
+        ----------
+        bounds : np.ndarray, shape (2, d)
+            Bounds for each input dimension. Row 0 contains lower bounds,
+            row 1 contains upper bounds.
+
+        Returns
+        -------
+        np.ndarray, shape (d,)
+            Uniformly sampled values within bounds.
+
+        Examples
+        --------
+        >>> bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
+        >>> sample = Recommender.random_sample_from_bounds(bounds)
+        >>> sample.shape
+        (2,)
+        >>> np.all((bounds[0, :] <= sample) & (sample <= bounds[1, :]))
+        True
+        """
+        return np.random.uniform(bounds[0, :], bounds[1, :])
 
     @abstractmethod
     def recommend_from_data(
@@ -130,7 +164,7 @@ class Recommender(ABC):
         X: np.ndarray,
         y: np.ndarray,
         bounds: np.ndarray,
-        objective: Literal["maximize", "minimize"],
+        objective: str,
     ) -> np.ndarray:
         """Suggest next experiment inputs from raw numpy arrays.
 
@@ -148,9 +182,9 @@ class Recommender(ABC):
             Training target values corresponding to X. Computed from outputs
             using the project's target configuration (e.g., direct output,
             ratio, difference). May be empty for the first recommendation.
-        bounds : np.ndarray, shape (n_features, 2)
-            Bounds for each input dimension. Each row is [lower, upper] for
-            the corresponding feature in X.
+        bounds : np.ndarray, shape (2, n_features)
+            Bounds for each input dimension. Row 0 contains lower bounds,
+            row 1 contains upper bounds (BoTorch format).
         objective : {"maximize", "minimize"}
             Optimization direction. "maximize" seeks higher target values,
             "minimize" seeks lower values.

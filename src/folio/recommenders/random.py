@@ -7,7 +7,6 @@ import numpy as np
 from folio.recommenders.base import Recommender
 
 if TYPE_CHECKING:
-    from folio.core.observation import Observation
     from folio.core.project import Project
 
 
@@ -70,33 +69,7 @@ class RandomRecommender(Recommender):
             The project defining the experiment schema, including input
             specifications with bounds for continuous inputs.
         """
-        raise NotImplementedError
-
-    def recommend(self, observations: list["Observation"]) -> dict[str, float]:
-        """Suggest random input values, ignoring all observations.
-
-        This method samples uniformly at random within the bounds of each
-        continuous input, completely ignoring the provided observations.
-
-        Parameters
-        ----------
-        observations : list[Observation]
-            Previous experiment observations. Ignored by RandomRecommender.
-
-        Returns
-        -------
-        dict[str, float]
-            Randomly sampled input values. Keys are input names, values are
-            floats uniformly sampled within each input's bounds.
-
-        Examples
-        --------
-        >>> recommender = RandomRecommender(project)
-        >>> inputs = recommender.recommend([])
-        >>> all(bounds[0] <= inputs[name] <= bounds[1] for name, bounds in ...)
-        True
-        """
-        raise NotImplementedError
+        super().__init__(project)
 
     def recommend_from_data(
         self,
@@ -113,8 +86,9 @@ class RandomRecommender(Recommender):
             Training inputs. Ignored by RandomRecommender.
         y : np.ndarray, shape (n_samples,)
             Training targets. Ignored by RandomRecommender.
-        bounds : np.ndarray, shape (n_features, 2)
-            Bounds for each input dimension. Each row is [lower, upper].
+        bounds : np.ndarray, shape (2, n_features)
+            Bounds for each input dimension. Row 0 contains lower bounds,
+            row 1 contains upper bounds (BoTorch format).
         objective : {"maximize", "minimize"}
             Optimization direction. Ignored by RandomRecommender.
 
@@ -125,7 +99,7 @@ class RandomRecommender(Recommender):
 
         Examples
         --------
-        >>> bounds = np.array([[0.0, 10.0], [-5.0, 5.0]])
+        >>> bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
         >>> x = recommender.recommend_from_data(
         ...     X=np.empty((0, 2)),
         ...     y=np.empty(0),
@@ -134,7 +108,7 @@ class RandomRecommender(Recommender):
         ... )
         >>> x.shape
         (2,)
-        >>> np.all((bounds[:, 0] <= x) & (x <= bounds[:, 1]))
+        >>> np.all((bounds[0, :] <= x) & (x <= bounds[1, :]))
         True
         """
-        raise NotImplementedError
+        return self.random_sample_from_bounds(bounds)

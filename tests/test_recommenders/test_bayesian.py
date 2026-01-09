@@ -589,20 +589,6 @@ class TestBayesianRecommenderEdgeCases:
 class TestBayesianRecommenderInternalMethods:
     """Test internal methods of BayesianRecommender."""
 
-    def test_random_sample_within_bounds(self, simple_project):
-        """_random_sample returns values within bounds."""
-        recommender = BayesianRecommender(simple_project)
-        for _ in range(20):
-            result = recommender._random_sample()
-            assert 0.0 <= result["x1"] <= 10.0
-            assert -5.0 <= result["x2"] <= 5.0
-
-    def test_random_sample_has_correct_keys(self, simple_project):
-        """_random_sample returns dict with correct input names."""
-        recommender = BayesianRecommender(simple_project)
-        result = recommender._random_sample()
-        assert set(result.keys()) == {"x1", "x2"}
-
     def test_fit_surrogate_creates_model(self, simple_project, enough_observations):
         """_fit_surrogate creates a fitted surrogate model."""
         torch.manual_seed(42)

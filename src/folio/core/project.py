@@ -253,6 +253,51 @@ class Project:
         """
         return [inp.bounds for inp in self.inputs if inp.type == "continuous"]
 
+    def get_optimization_bounds(self) -> np.ndarray:
+        """Return bounds in BoTorch optimize_acqf format.
+
+        Returns bounds as a 2D array suitable for BoTorch's optimize_acqf function.
+        Row 0 contains lower bounds, row 1 contains upper bounds for each
+        continuous input dimension.
+
+        Returns
+        -------
+        np.ndarray, shape (2, d)
+            Bounds array where d is the number of continuous inputs.
+            bounds[0, :] are lower bounds, bounds[1, :] are upper bounds.
+
+        Examples
+        --------
+        >>> project = Project(
+        ...     id=None,
+        ...     name="example",
+        ...     inputs=[
+        ...         InputSpec("x1", "continuous", bounds=(0.0, 10.0)),
+        ...         InputSpec("x2", "continuous", bounds=(-5.0, 5.0)),
+        ...     ],
+        ...     outputs=[OutputSpec("y")],
+        ...     target_config=TargetConfig("y"),
+        ... )
+        >>> project.get_optimization_bounds()
+        array([[ 0., -5.],
+               [10.,  5.]])
+
+        Notes
+        -----
+        Only continuous inputs are included. Categorical inputs are excluded
+        since they don't have numeric bounds suitable for gradient-based
+        optimization.
+        """
+        bounds = self.get_bounds()
+        num_features = len(bounds)
+        opt_bounds = np.zeros((2, num_features))
+
+        for feature in range(num_features):
+            opt_bounds[0, feature] = bounds[feature][0]
+            opt_bounds[1, feature] = bounds[feature][1]
+
+        return opt_bounds
+
     def get_target(self) -> DirectTarget | RatioTarget | DifferenceTarget | SlopeTarget:
         """Create the appropriate target instance based on target_config.
 

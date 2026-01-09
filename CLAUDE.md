@@ -112,7 +112,10 @@ src/folio/
 │   ├── observation.py  # Observation dataclass
 │   ├── project.py      # Project dataclass
 │   └── database.py     # SQLite CRUD operations
-├── recommenders/       # Recommender interface + implementations (BO, random, grid)
+├── recommenders/       # Recommender interface + implementations
+│   ├── base.py         # Recommender ABC with recommend() and recommend_from_data()
+│   ├── bayesian.py     # BayesianRecommender (GP + acquisition optimization)
+│   ├── random.py       # RandomRecommender (uniform sampling)
 │   └── acquisitions/   # Acquisition functions (EI, UCB) - internal to recommenders
 ├── surrogates/
 │   ├── base.py         # Surrogate ABC
@@ -134,7 +137,7 @@ Note: `targets/` uses `TYPE_CHECKING` for `Observation` imports to avoid circula
 - **Project**: Experiment schema (inputs, outputs, target config, recommender config, procedure, hazards)
 - **Observation**: Single data point (inputs dict, outputs dict, timestamp, notes, tag, images, failed)
 - **Target**: Extracts scalar optimization target from Observation (direct or derived from outputs)
-- **Recommender**: Suggests next experiments. Implementations: BORecommender, RandomRecommender, GridRecommender
+- **Recommender**: Suggests next experiments. Interface: recommend(observations) → dict, recommend_from_data(X, y, bounds, objective) → np.ndarray. Implementations: BayesianRecommender, RandomRecommender
 - **Surrogate**: Model that fits observations. Interface: fit(X, y), predict(X) → (mean, std). SingleTaskGPSurrogate for scalar targets, MultiTaskGPSurrogate for correlated multi-output targets.
 - **Acquisition**: Builds BoTorch-compatible acquisition functions (internal to recommenders). Interface: build(model, best_f, maximize) → AcquisitionFunction. The returned function has forward(X) for use with optimize_acqf.
 - **Executor**: Runs experiments. HumanExecutor for manual, ClaudeLightExecutor for autonomous closed-loop
@@ -186,7 +189,7 @@ User enters observation (inputs, outputs)
         ↓
     Surrogate.fit(X, y)
         ↓
-    Recommender.suggest() → next inputs
+    Recommender.recommend() → next inputs
         ↓
     Executor.run(inputs) → outputs  [or display to user]
         ↓
@@ -332,12 +335,15 @@ with pytest.raises(ValueError, match="Array shapes must match exactly"):
   - [x] ExpectedImprovement: EI with xi parameter, returns _EIAcquisition
   - [x] UpperConfidenceBound: UCB with beta parameter, returns _UCBAcquisition
   - [x] Inner classes implement forward(X) for use with optimize_acqf
+- [x] Recommender interface (prototypes with tests, awaiting implementation)
+  - [x] Recommender ABC with recommend(observations) and recommend_from_data(X, y, bounds, objective)
+  - [x] BayesianRecommender: GP surrogate + acquisition optimization (prototype)
+  - [x] RandomRecommender: uniform sampling within bounds (prototype)
+  - [x] Project.get_optimization_bounds() returns (2, d) array for BoTorch
 - [ ] Add images field to Observation
 - [ ] Add procedure, hazards fields to Project
 - [ ] libSQL cloud sync support in Database
-- [ ] Recommender interface
-- [ ] BORecommender
-- [ ] RandomRecommender, GridRecommender
+- [ ] GridRecommender
 - [ ] Executor interface
   - [ ] HumanExecutor
   - [ ] ClaudeLightExecutor

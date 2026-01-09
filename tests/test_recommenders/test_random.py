@@ -138,7 +138,8 @@ class TestRandomRecommenderRecommendFromData:
     def test_recommend_from_data_returns_array(self, simple_project):
         """recommend_from_data() returns a numpy array."""
         recommender = RandomRecommender(simple_project)
-        bounds = np.array([[0.0, 10.0], [-5.0, 5.0]])
+        # Bounds shape (2, d): row 0 = lower, row 1 = upper
+        bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
         result = recommender.recommend_from_data(
             X=np.empty((0, 2)),
             y=np.empty(0),
@@ -150,7 +151,7 @@ class TestRandomRecommenderRecommendFromData:
     def test_recommend_from_data_correct_shape(self, simple_project):
         """recommend_from_data() returns array with shape (n_features,)."""
         recommender = RandomRecommender(simple_project)
-        bounds = np.array([[0.0, 10.0], [-5.0, 5.0]])
+        bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
         result = recommender.recommend_from_data(
             X=np.empty((0, 2)),
             y=np.empty(0),
@@ -162,7 +163,7 @@ class TestRandomRecommenderRecommendFromData:
     def test_recommend_from_data_within_bounds(self, simple_project):
         """recommend_from_data() returns values within bounds."""
         recommender = RandomRecommender(simple_project)
-        bounds = np.array([[0.0, 10.0], [-5.0, 5.0]])
+        bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
         for _ in range(20):
             result = recommender.recommend_from_data(
                 X=np.empty((0, 2)),
@@ -170,24 +171,24 @@ class TestRandomRecommenderRecommendFromData:
                 bounds=bounds,
                 objective="maximize",
             )
-            assert np.all((bounds[:, 0] <= result) & (result <= bounds[:, 1]))
+            assert np.all((bounds[0, :] <= result) & (result <= bounds[1, :]))
 
     def test_recommend_from_data_ignores_X_y(self, simple_project):
         """recommend_from_data() ignores X and y (samples randomly)."""
         recommender = RandomRecommender(simple_project)
-        bounds = np.array([[0.0, 10.0], [-5.0, 5.0]])
+        bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
         X = np.array([[5.0, 0.0], [2.0, -3.0]])
         y = np.array([10.0, 7.0])
         result = recommender.recommend_from_data(
             X=X, y=y, bounds=bounds, objective="maximize"
         )
         # Should still return valid result within bounds
-        assert np.all((bounds[:, 0] <= result) & (result <= bounds[:, 1]))
+        assert np.all((bounds[0, :] <= result) & (result <= bounds[1, :]))
 
     def test_recommend_from_data_ignores_objective(self, simple_project):
         """recommend_from_data() ignores objective (samples randomly)."""
         recommender = RandomRecommender(simple_project)
-        bounds = np.array([[0.0, 10.0], [-5.0, 5.0]])
+        bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
         # Both objectives should produce valid results
         result_max = recommender.recommend_from_data(
             X=np.empty((0, 2)),
@@ -201,13 +202,14 @@ class TestRandomRecommenderRecommendFromData:
             bounds=bounds,
             objective="minimize",
         )
-        assert np.all((bounds[:, 0] <= result_max) & (result_max <= bounds[:, 1]))
-        assert np.all((bounds[:, 0] <= result_min) & (result_min <= bounds[:, 1]))
+        assert np.all((bounds[0, :] <= result_max) & (result_max <= bounds[1, :]))
+        assert np.all((bounds[0, :] <= result_min) & (result_min <= bounds[1, :]))
 
     def test_recommend_from_data_single_dimension(self, single_input_project):
         """recommend_from_data() works with single dimension."""
         recommender = RandomRecommender(single_input_project)
-        bounds = np.array([[0.0, 1.0]])
+        # Shape (2, 1) for single dimension
+        bounds = np.array([[0.0], [1.0]])
         result = recommender.recommend_from_data(
             X=np.empty((0, 1)),
             y=np.empty(0),
@@ -230,7 +232,13 @@ class TestRandomRecommenderRecommendFromData:
             target_config=TargetConfig("y"),
         )
         recommender = RandomRecommender(project)
-        bounds = np.array([[0.0, 1.0]] * 10)
+        # Shape (2, 10) for 10 dimensions
+        bounds = np.array(
+            [
+                [0.0] * 10,
+                [1.0] * 10,
+            ]
+        )
         result = recommender.recommend_from_data(
             X=np.empty((0, 10)),
             y=np.empty(0),
@@ -238,7 +246,7 @@ class TestRandomRecommenderRecommendFromData:
             objective="maximize",
         )
         assert result.shape == (10,)
-        assert np.all((bounds[:, 0] <= result) & (result <= bounds[:, 1]))
+        assert np.all((bounds[0, :] <= result) & (result <= bounds[1, :]))
 
 
 class TestRandomRecommenderRandomness:
@@ -263,7 +271,7 @@ class TestRandomRecommenderRandomness:
     def test_recommend_from_data_multiple_calls_differ(self, simple_project):
         """recommend_from_data() should produce different samples."""
         recommender = RandomRecommender(simple_project)
-        bounds = np.array([[0.0, 10.0], [-5.0, 5.0]])
+        bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
         results = [
             recommender.recommend_from_data(
                 X=np.empty((0, 2)), y=np.empty(0), bounds=bounds, objective="maximize"
