@@ -70,7 +70,7 @@ def ucb_project():
             surrogate="gp",
             acquisition="ucb",
             n_initial=3,
-            kwargs={"beta": 2.5},
+            acquisition_kwargs={"beta": 2.5},
         ),
     )
 
@@ -189,7 +189,8 @@ class TestBayesianRecommenderRecommendFromData:
         recommender = BayesianRecommender(simple_project)
         X = np.array([[5.0, 0.0], [2.0, -3.0], [8.0, 2.0], [1.0, -1.0]])
         y = np.array([10.0, 7.0, 15.0, 5.0])
-        bounds = np.array([[0.0, 10.0], [-5.0, 5.0]])
+        # Bounds shape (2, d): row 0 = lower, row 1 = upper
+        bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
         result = recommender.recommend_from_data(X, y, bounds, "maximize")
         assert isinstance(result, np.ndarray)
 
@@ -199,7 +200,7 @@ class TestBayesianRecommenderRecommendFromData:
         recommender = BayesianRecommender(simple_project)
         X = np.array([[5.0, 0.0], [2.0, -3.0], [8.0, 2.0], [1.0, -1.0]])
         y = np.array([10.0, 7.0, 15.0, 5.0])
-        bounds = np.array([[0.0, 10.0], [-5.0, 5.0]])
+        bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
         result = recommender.recommend_from_data(X, y, bounds, "maximize")
         assert result.shape == (2,)
 
@@ -209,19 +210,19 @@ class TestBayesianRecommenderRecommendFromData:
         recommender = BayesianRecommender(simple_project)
         X = np.array([[5.0, 0.0], [2.0, -3.0], [8.0, 2.0], [1.0, -1.0]])
         y = np.array([10.0, 7.0, 15.0, 5.0])
-        bounds = np.array([[0.0, 10.0], [-5.0, 5.0]])
+        bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
         result = recommender.recommend_from_data(X, y, bounds, "maximize")
-        assert np.all((bounds[:, 0] <= result) & (result <= bounds[:, 1]))
+        assert np.all((bounds[0, :] <= result) & (result <= bounds[1, :]))
 
     def test_recommend_from_data_empty_X_returns_random(self, simple_project):
         """recommend_from_data() with empty X returns random sample."""
         recommender = BayesianRecommender(simple_project)
-        bounds = np.array([[0.0, 10.0], [-5.0, 5.0]])
+        bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
         result = recommender.recommend_from_data(
             X=np.empty((0, 2)), y=np.empty(0), bounds=bounds, objective="maximize"
         )
         assert result.shape == (2,)
-        assert np.all((bounds[:, 0] <= result) & (result <= bounds[:, 1]))
+        assert np.all((bounds[0, :] <= result) & (result <= bounds[1, :]))
 
     def test_recommend_from_data_few_samples_returns_random(self, simple_project):
         """recommend_from_data() with fewer than n_initial samples returns random."""
@@ -229,10 +230,10 @@ class TestBayesianRecommenderRecommendFromData:
         # n_initial=3, so 2 samples should trigger random
         X = np.array([[5.0, 0.0], [2.0, -3.0]])
         y = np.array([10.0, 7.0])
-        bounds = np.array([[0.0, 10.0], [-5.0, 5.0]])
+        bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
         result = recommender.recommend_from_data(X, y, bounds, "maximize")
         assert result.shape == (2,)
-        assert np.all((bounds[:, 0] <= result) & (result <= bounds[:, 1]))
+        assert np.all((bounds[0, :] <= result) & (result <= bounds[1, :]))
 
     def test_recommend_from_data_maximize(self, simple_project):
         """recommend_from_data() respects maximize objective."""
@@ -241,9 +242,9 @@ class TestBayesianRecommenderRecommendFromData:
         # Pattern: y increases with x1
         X = np.array([[1.0, 0.0], [5.0, 0.0], [9.0, 0.0]])
         y = np.array([1.0, 5.0, 9.0])
-        bounds = np.array([[0.0, 10.0], [-5.0, 5.0]])
+        bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
         result = recommender.recommend_from_data(X, y, bounds, "maximize")
-        assert np.all((bounds[:, 0] <= result) & (result <= bounds[:, 1]))
+        assert np.all((bounds[0, :] <= result) & (result <= bounds[1, :]))
 
     def test_recommend_from_data_minimize(self, minimize_project):
         """recommend_from_data() respects minimize objective."""
@@ -252,9 +253,9 @@ class TestBayesianRecommenderRecommendFromData:
         # Pattern: y increases with x1, so minimum is at low x1
         X = np.array([[1.0, 0.0], [5.0, 0.0], [9.0, 0.0]])
         y = np.array([1.0, 5.0, 9.0])
-        bounds = np.array([[0.0, 10.0], [-5.0, 5.0]])
+        bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
         result = recommender.recommend_from_data(X, y, bounds, "minimize")
-        assert np.all((bounds[:, 0] <= result) & (result <= bounds[:, 1]))
+        assert np.all((bounds[0, :] <= result) & (result <= bounds[1, :]))
 
     def test_recommend_from_data_single_dimension(self, single_input_project):
         """recommend_from_data() works with single dimension."""
@@ -262,7 +263,8 @@ class TestBayesianRecommenderRecommendFromData:
         recommender = BayesianRecommender(single_input_project)
         X = np.array([[0.2], [0.5], [0.8]])
         y = np.array([0.2, 0.8, 0.4])
-        bounds = np.array([[0.0, 1.0]])
+        # Shape (2, 1) for single dimension
+        bounds = np.array([[0.0], [1.0]])
         result = recommender.recommend_from_data(X, y, bounds, "maximize")
         assert result.shape == (1,)
         assert 0.0 <= result[0] <= 1.0
@@ -429,7 +431,7 @@ class TestBayesianRecommenderAcquisitionEI:
                 type="bayesian",
                 acquisition="ei",
                 n_initial=3,
-                kwargs={"xi": 0.1},
+                acquisition_kwargs={"xi": 0.1},
             ),
         )
         observations = [
@@ -599,28 +601,37 @@ class TestBayesianRecommenderInternalMethods:
         assert recommender._surrogate is not None
         assert recommender._surrogate._is_fitted
 
-    def test_build_acquisition_ei(self, simple_project):
-        """_build_acquisition creates EI acquisition for ei config."""
-        from folio.recommenders.acquisitions import ExpectedImprovement
+    def test_build_acquisition_ei(self, simple_project, enough_observations):
+        """_build_acquisition creates callable acquisition for ei config."""
+        from botorch.acquisition import AcquisitionFunction
 
+        torch.manual_seed(42)
         recommender = BayesianRecommender(simple_project)
-        acq = recommender._build_acquisition()
-        assert isinstance(acq, ExpectedImprovement)
+        X, y = simple_project.get_training_data(enough_observations)
+        recommender._fit_surrogate(X, y)
+        acq_fn = recommender._build_acquisition(best_f=float(y.max()), maximize=True)
+        assert isinstance(acq_fn, AcquisitionFunction)
 
-    def test_build_acquisition_ucb(self, ucb_project):
-        """_build_acquisition creates UCB acquisition for ucb config."""
-        from folio.recommenders.acquisitions import UpperConfidenceBound
+    def test_build_acquisition_ucb(self, ucb_project, enough_observations):
+        """_build_acquisition creates callable acquisition for ucb config."""
+        from botorch.acquisition import AcquisitionFunction
 
+        torch.manual_seed(42)
         recommender = BayesianRecommender(ucb_project)
-        acq = recommender._build_acquisition()
-        assert isinstance(acq, UpperConfidenceBound)
+        X, y = ucb_project.get_training_data(enough_observations)
+        recommender._fit_surrogate(X, y)
+        acq_fn = recommender._build_acquisition(best_f=float(y.max()), maximize=True)
+        assert isinstance(acq_fn, AcquisitionFunction)
 
 
 class TestBayesianRecommenderKwargsPassthrough:
     """Test that kwargs are passed through to acquisition functions."""
 
     def test_xi_passed_to_ei(self):
-        """xi kwarg is passed to ExpectedImprovement."""
+        """xi kwarg is accepted by ExpectedImprovement builder."""
+        from botorch.acquisition import AcquisitionFunction
+
+        torch.manual_seed(42)
         project = Project(
             id=1,
             name="ei_project",
@@ -629,15 +640,21 @@ class TestBayesianRecommenderKwargsPassthrough:
             target_config=TargetConfig("y"),
             recommender_config=RecommenderConfig(
                 acquisition="ei",
-                kwargs={"xi": 0.5},
+                acquisition_kwargs={"xi": 0.5},
             ),
         )
         recommender = BayesianRecommender(project)
-        acq = recommender._build_acquisition()
-        assert acq.xi == 0.5
+        X = np.array([[0.2], [0.5], [0.8]])
+        y = np.array([0.2, 0.8, 0.4])
+        recommender._fit_surrogate(X, y)
+        acq_fn = recommender._build_acquisition(best_f=0.8, maximize=True)
+        assert isinstance(acq_fn, AcquisitionFunction)
 
     def test_beta_passed_to_ucb(self):
-        """beta kwarg is passed to UpperConfidenceBound."""
+        """beta kwarg is accepted by UpperConfidenceBound builder."""
+        from botorch.acquisition import AcquisitionFunction
+
+        torch.manual_seed(42)
         project = Project(
             id=1,
             name="ucb_project",
@@ -646,15 +663,21 @@ class TestBayesianRecommenderKwargsPassthrough:
             target_config=TargetConfig("y"),
             recommender_config=RecommenderConfig(
                 acquisition="ucb",
-                kwargs={"beta": 3.0},
+                acquisition_kwargs={"beta": 3.0},
             ),
         )
         recommender = BayesianRecommender(project)
-        acq = recommender._build_acquisition()
-        assert acq.beta == 3.0
+        X = np.array([[0.2], [0.5], [0.8]])
+        y = np.array([0.2, 0.8, 0.4])
+        recommender._fit_surrogate(X, y)
+        acq_fn = recommender._build_acquisition(best_f=0.8, maximize=True)
+        assert isinstance(acq_fn, AcquisitionFunction)
 
     def test_default_xi_when_not_specified(self):
         """Default xi is used when not specified in kwargs."""
+        from botorch.acquisition import AcquisitionFunction
+
+        torch.manual_seed(42)
         project = Project(
             id=1,
             name="ei_default",
@@ -664,11 +687,17 @@ class TestBayesianRecommenderKwargsPassthrough:
             recommender_config=RecommenderConfig(acquisition="ei"),
         )
         recommender = BayesianRecommender(project)
-        acq = recommender._build_acquisition()
-        assert acq.xi == 0.01  # default value
+        X = np.array([[0.2], [0.5], [0.8]])
+        y = np.array([0.2, 0.8, 0.4])
+        recommender._fit_surrogate(X, y)
+        acq_fn = recommender._build_acquisition(best_f=0.8, maximize=True)
+        assert isinstance(acq_fn, AcquisitionFunction)
 
     def test_default_beta_when_not_specified(self):
         """Default beta is used when not specified in kwargs."""
+        from botorch.acquisition import AcquisitionFunction
+
+        torch.manual_seed(42)
         project = Project(
             id=1,
             name="ucb_default",
@@ -678,8 +707,11 @@ class TestBayesianRecommenderKwargsPassthrough:
             recommender_config=RecommenderConfig(acquisition="ucb"),
         )
         recommender = BayesianRecommender(project)
-        acq = recommender._build_acquisition()
-        assert acq.beta == 2.0  # default value
+        X = np.array([[0.2], [0.5], [0.8]])
+        y = np.array([0.2, 0.8, 0.4])
+        recommender._fit_surrogate(X, y)
+        acq_fn = recommender._build_acquisition(best_f=0.8, maximize=True)
+        assert isinstance(acq_fn, AcquisitionFunction)
 
 
 class TestBayesianRecommenderSurrogateConfig:

@@ -3,9 +3,13 @@
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
+import torch
+from botorch.acquisition import AcquisitionFunction
+from botorch.optim.optimize import optimize_acqf
 
 from folio.recommenders.acquisitions import (
-    Acquisition,
+    ExpectedImprovement,
+    UpperConfidenceBound,
 )
 from folio.recommenders.base import Recommender
 from folio.surrogates import MultiTaskGPSurrogate, SingleTaskGPSurrogate
@@ -138,7 +142,11 @@ class BayesianRecommender(Recommender):
         >>> bounds = np.array([[0.0, 0.0], [1.0, 1.0]])
         >>> next_x = recommender.recommend_from_data(X, y, bounds, "maximize")
         """
-        raise NotImplementedError
+        if len(X) < self.project.recommender_config.n_initial:
+            return self.random_sample_from_bounds(bounds)
+
+        self._fit_surrogate(X, y)
+        return self._optimize_acquisition(y, bounds, objective)
 
     def _fit_surrogate(self, X: np.ndarray, y: np.ndarray) -> None:
         """Fit the GP surrogate model to training data.
@@ -170,9 +178,21 @@ class BayesianRecommender(Recommender):
         >>> recommender._fit_surrogate(X, y)
         >>> assert recommender._surrogate._is_fitted
         """
-        raise NotImplementedError
+        surrogate_type = self.project.recommender_config.surrogate
+        kwargs = self.project.recommender_config.surrogate_kwargs
 
-    def _optimize_acquisition(self, y: np.ndarray) -> dict[str, float]:
+        if surrogate_type == "gp":
+            self._surrogate = SingleTaskGPSurrogate(**kwargs)
+        elif surrogate_type == "multitask_gp":
+            self._surrogate = MultiTaskGPSurrogate(**kwargs)
+        else:
+            raise ValueError(f"Unknown surrogate type: {surrogate_type}")
+
+        self._surrogate.fit(X, y)
+
+    def _optimize_acquisition(
+        self, y: np.ndarray, bounds: np.ndarray, objective: str
+    ) -> np.ndarray:
         """Optimize the acquisition function to find the next point.
 
         Uses BoTorch's optimize_acqf to find the input that maximizes
@@ -183,10 +203,14 @@ class BayesianRecommender(Recommender):
         y : np.ndarray, shape (n_samples,)
             Training target values, used to compute best_f for
             improvement-based acquisition functions.
+        bounds : np.ndarray, shape (2, n_features)
+            Bounds for optimization. Row 0 = lower, row 1 = upper.
+        objective : {"maximize", "minimize"}
+            Optimization direction, used to determine best_f.
 
         Returns
         -------
-        dict[str, float]
+        np.ndarray, shape (n_features,)
             Optimal input values according to the acquisition function.
 
         Notes
@@ -201,34 +225,65 @@ class BayesianRecommender(Recommender):
         Examples
         --------
         >>> recommender._fit_surrogate(X, y)
-        >>> next_inputs = recommender._optimize_acquisition(y)
+        >>> next_x = recommender._optimize_acquisition(y, bounds, "maximize")
         """
-        raise NotImplementedError
+        if objective == "maximize":
+            best_f = float(y.max())
+            maximize = True
+        elif objective == "minimize":
+            best_f = float(y.min())
+            maximize = False
+        else:
+            raise ValueError(f"Unknown objective: {objective}")
 
-    def _build_acquisition(self) -> Acquisition:
-        """Build the acquisition function based on recommender config.
+        acq = self._build_acquisition(best_f, maximize)
 
-        Creates an ExpectedImprovement or UpperConfidenceBound instance
-        based on the project's recommender_config.acquisition setting.
-        Passes through any relevant kwargs (xi for EI, beta for UCB).
+        bounds = torch.tensor(bounds, dtype=torch.float64)
+
+        candidates, acq_values = optimize_acqf(
+            acq, bounds, q=1, num_restarts=5, raw_samples=5
+        )
+
+        return candidates[0].detach().numpy()
+
+    def _build_acquisition(self, best_f: float, maximize: bool) -> AcquisitionFunction:
+        """Build a BoTorch acquisition function based on recommender config.
+
+        Creates and returns a ready-to-use BoTorch acquisition function
+        using self._surrogate and the project's recommender_config.acquisition
+        setting.
+
+        Parameters
+        ----------
+        best_f : float
+            Best observed target value so far.
+        maximize : bool
+            If True, seek higher values; if False, seek lower values.
 
         Returns
         -------
-        Acquisition
-            An acquisition function builder (ExpectedImprovement or
-            UpperConfidenceBound) configured with kwargs from the
-            recommender config.
+        AcquisitionFunction
+            A BoTorch-compatible acquisition function ready for optimize_acqf.
+
+        Notes
+        -----
+        This method assumes _fit_surrogate has already been called and
+        self._surrogate is a fitted surrogate model.
 
         Examples
         --------
         >>> recommender = BayesianRecommender(project)  # acquisition="ei"
-        >>> acq = recommender._build_acquisition()
-        >>> isinstance(acq, ExpectedImprovement)
-        True
-
-        >>> recommender = BayesianRecommender(ucb_project)  # acquisition="ucb"
-        >>> acq = recommender._build_acquisition()
-        >>> isinstance(acq, UpperConfidenceBound)
-        True
+        >>> recommender._fit_surrogate(X, y)
+        >>> acq_fn = recommender._build_acquisition(best_f=1.0, maximize=True)
         """
-        raise NotImplementedError
+        acq_type = self.project.recommender_config.acquisition
+        kwargs = self.project.recommender_config.acquisition_kwargs
+
+        if acq_type == "ei":
+            builder = ExpectedImprovement(**kwargs)
+        elif acq_type == "ucb":
+            builder = UpperConfidenceBound(**kwargs)
+        else:
+            raise ValueError(f"Unknown acquisition function: {acq_type}")
+
+        return builder.build(self._surrogate.model, best_f, maximize)

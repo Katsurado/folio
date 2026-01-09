@@ -84,8 +84,9 @@ class RecommenderConfig:
     type : str, optional
         Recommender strategy: "bayesian", "random", or "grid". Defaults to "bayesian".
     surrogate : str, optional
-        Surrogate model for Bayesian optimization: "gp" (Gaussian Process).
-        Defaults to "gp". Ignored for non-Bayesian recommenders.
+        Surrogate model for Bayesian optimization: "gp" (SingleTaskGPSurrogate)
+        or "multitask_gp" (MultiTaskGPSurrogate). Defaults to "gp".
+        Ignored for non-Bayesian recommenders.
     acquisition : str, optional
         Acquisition function for Bayesian optimization: "ei" (Expected Improvement)
         or "ucb" (Upper Confidence Bound). Defaults to "ei".
@@ -93,18 +94,28 @@ class RecommenderConfig:
     n_initial : int, optional
         Number of initial random samples before using the surrogate model.
         Defaults to 5. The surrogate needs sufficient data to make useful predictions.
-    kwargs : dict[str, Any], optional
-        Additional keyword arguments passed to the recommender implementation.
-        For example, {"beta": 2.0} for UCB acquisition function.
+    surrogate_kwargs : dict[str, Any], optional
+        Keyword arguments passed to the surrogate model constructor.
+        For SingleTaskGPSurrogate: {"kernel": "matern", "nu": 2.5, "ard": True,
+        "normalize_inputs": True, "normalize_outputs": True}.
+    acquisition_kwargs : dict[str, Any], optional
+        Keyword arguments passed to the acquisition function constructor.
+        For EI: {"xi": 0.01}. For UCB: {"beta": 2.0}.
 
     Examples
     --------
     >>> bo_config = RecommenderConfig(type="bayesian", surrogate="gp", acquisition="ei")
     >>> random_config = RecommenderConfig(type="random", n_initial=10)
+    >>> custom_gp = RecommenderConfig(
+    ...     surrogate="gp",
+    ...     surrogate_kwargs={"kernel": "rbf", "ard": False},
+    ...     acquisition_kwargs={"xi": 0.1},
+    ... )
     """
 
     type: str = "bayesian"
     surrogate: str = "gp"
     acquisition: str = "ei"
     n_initial: int = 5
-    kwargs: dict[str, Any] = field(default_factory=dict)
+    surrogate_kwargs: dict[str, Any] = field(default_factory=dict)
+    acquisition_kwargs: dict[str, Any] = field(default_factory=dict)
