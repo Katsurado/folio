@@ -4,7 +4,14 @@ from typing import Literal
 
 import numpy as np
 import torch
+from botorch.fit import fit_gpytorch_mll
+from botorch.models import MultiTaskGP
+from botorch.models.transforms.input import Normalize
+from botorch.models.transforms.outcome import Standardize
+from gpytorch.kernels import MaternKernel, RBFKernel, ScaleKernel
+from gpytorch.mlls import ExactMarginalLogLikelihood
 
+from folio.exceptions import NotFittedError
 from folio.surrogates.base import Surrogate
 
 
@@ -167,6 +174,8 @@ class MultiTaskGPSurrogate(Surrogate):
             If y.shape[1] < 2 (use SingleTaskGPSurrogate for single output).
         ValueError
             If X.shape[0] != y.shape[0] (different number of samples).
+        ValueError
+            If X.shape[0] < 1 (no training samples).
 
         Notes
         -----
@@ -183,7 +192,64 @@ class MultiTaskGPSurrogate(Surrogate):
         >>> # Method chaining
         >>> mean, std = MultiTaskGPSurrogate().fit(X_train, y_train).predict(X_test)
         """
-        raise NotImplementedError
+        X = X[:, np.newaxis] if X.ndim == 1 else X
+
+        if X.shape[0] != y.shape[0]:
+            raise ValueError(
+                f"Number of samples ({X.shape[0]}) "
+                f"should match number of labels ({y.shape[0]})"
+            )
+        if X.shape[0] < 1:
+            raise ValueError(f"Cannot fit model with {X.shape[0]} observations")
+        if y.ndim != 2:
+            raise ValueError("y must be an 2d array")
+        if y.shape[1] < 2:
+            raise ValueError("use SingleTaskGPSurrogate for single output")
+
+        X = torch.tensor(X, dtype=torch.float64)
+        y = torch.tensor(y, dtype=torch.float64)
+
+        self.n_features = X.shape[1]
+        ard_features = self.n_features if self.ard else None
+
+        if self.kernel == "matern":
+            base_kernel = MaternKernel(nu=self.nu, ard_num_dims=ard_features)
+        else:
+            base_kernel = RBFKernel(ard_num_dims=ard_features)
+
+        self.n_tasks = y.shape[1]
+
+        covar_module = ScaleKernel(base_kernel)
+
+        if self.normalize_inputs:
+            input_transform = Normalize(
+                d=self.n_features + 1, indices=list(range(self.n_features))
+            )
+        else:
+            input_transform = None
+
+        if self.normalize_outputs:
+            output_transform = Standardize(m=1)
+        else:
+            output_transform = None
+
+        X_mt, y_mt = self._to_multitask_format(X, y)
+
+        self.model = MultiTaskGP(
+            train_X=X_mt,
+            train_Y=y_mt,
+            task_feature=-1,
+            covar_module=covar_module,
+            input_transform=input_transform,
+            outcome_transform=output_transform,
+            output_tasks=list(range(self.n_tasks)),
+        )
+
+        mll = ExactMarginalLogLikelihood(self.model.likelihood, self.model)
+        fit_gpytorch_mll(mll)
+
+        self._is_fitted = True
+        return self
 
     def predict(self, X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Predict mean and standard deviation at candidate points for all tasks.
@@ -226,7 +292,27 @@ class MultiTaskGPSurrogate(Surrogate):
         >>> np.all(std >= 0)
         True
         """
-        raise NotImplementedError
+        X = X[:, np.newaxis] if X.ndim == 1 else X
+
+        if not self._is_fitted:
+            raise NotFittedError("Call fit() first before predict()")
+        if X.shape[1] != self.n_features:
+            raise ValueError(
+                f"Feature dimension mismatch: "
+                f"fitted with {self.n_features} features, "
+                f"but passed in new data with {X.shape[1]} features"
+            )
+
+        X = torch.tensor(X, dtype=torch.float64)
+
+        posterior = self.model.posterior(X)
+        mean = posterior.mean
+        std = posterior.variance.sqrt()
+
+        mean = mean.detach().numpy()
+        std = std.detach().numpy()
+
+        return mean, std
 
     def _to_multitask_format(
         self, X: torch.Tensor, y: torch.Tensor
@@ -262,4 +348,19 @@ class MultiTaskGPSurrogate(Surrogate):
         >>> X_mt[:, -1]  # task indices
         tensor([0., 0., 1., 1.])
         """
-        raise NotImplementedError
+        X_mt = []
+        y_mt = []
+        n_samples = X.shape[0]
+        n_tasks = y.shape[1]
+
+        for task in range(n_tasks):
+            task_vector = torch.full((n_samples, 1), task, dtype=torch.float64)
+            X_with_task = torch.cat((X, task_vector), dim=1)
+            y_task = y[:, task]
+            X_mt.append(X_with_task)
+            y_mt.append(y_task)
+
+        X_mt = torch.cat(X_mt, 0)
+        y_mt = torch.cat(y_mt, 0).unsqueeze(-1)
+
+        return X_mt, y_mt

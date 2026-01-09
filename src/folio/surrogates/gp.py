@@ -168,6 +168,8 @@ class SingleTaskGPSurrogate(Surrogate):
         Raises
         ------
         ValueError
+            If y.ndim != 1 (must be 1D array).
+        ValueError
             If X.shape[0] != y.shape[0] (different number of samples).
         ValueError
             If X.shape[0] < 1 (no training samples).
@@ -199,6 +201,8 @@ class SingleTaskGPSurrogate(Surrogate):
             )
         if X.shape[0] < 1:
             raise ValueError(f"Cannot fit model with {X.shape[0]} observations")
+        if y.ndim != 1:
+            raise ValueError("y must be an 1d array")
 
         X = torch.tensor(X, dtype=torch.float64)
         y = torch.tensor(y, dtype=torch.float64).unsqueeze(-1)

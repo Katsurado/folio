@@ -117,6 +117,13 @@ class TestSingleTaskGPSurrogateFit:
         with pytest.raises(ValueError, match="samples"):
             SingleTaskGPSurrogate().fit(X, y[:-1])
 
+    def test_fit_y_2d_raises(self):
+        """fit() raises ValueError if y is 2D."""
+        X = np.array([[0.0], [0.5], [1.0]])
+        y = np.array([[0.0], [0.5], [1.0]])
+        with pytest.raises(ValueError, match="(?i)1d|1-d|dimension|ndim"):
+            SingleTaskGPSurrogate().fit(X, y)
+
     def test_fit_single_sample(self):
         """fit() works with a single training point."""
         X = np.array([[0.5]])
