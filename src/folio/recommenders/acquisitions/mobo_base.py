@@ -1,0 +1,142 @@
+"""Abstract base class for multi-objective acquisition function builders."""
+
+from abc import ABC, abstractmethod
+
+import torch
+from botorch.acquisition import AcquisitionFunction
+from botorch.models.model import Model
+
+
+class MultiObjectiveAcquisition(ABC):
+    """Abstract base class for building multi-objective acquisition functions.
+
+    Multi-objective acquisition functions guide the search for Pareto-optimal
+    solutions when optimizing multiple conflicting objectives simultaneously.
+    Unlike single-objective acquisition functions that optimize a scalar target,
+    multi-objective variants work with the Pareto frontier and use metrics like
+    hypervolume improvement to identify promising candidates.
+
+    This class follows the builder pattern: instances store hyperparameters and
+    provide a `build()` method that returns a BoTorch AcquisitionFunction ready
+    for use with optimize_acqf. The builder pattern enables:
+
+    - Reusing the same configuration across multiple optimization iterations
+    - Swapping acquisition functions (EHVI, ParEGO, etc.) without changing the loop
+    - Clean separation between user-facing config and BoTorch internals
+
+    Common multi-objective acquisition functions include:
+
+    - **EHVI (Expected Hypervolume Improvement)**: Maximizes expected improvement
+      in the hypervolume dominated by the Pareto frontier. Requires a reference
+      point that is dominated by all Pareto-optimal solutions.
+
+    - **ParEGO**: Scalarizes objectives using random weights and applies standard
+      single-objective acquisition. Simple but effective, especially for many
+      objectives where EHVI becomes expensive.
+
+    - **NEHVI (Noisy Expected Hypervolume Improvement)**: Variant of EHVI that
+      accounts for observation noise in the objectives.
+
+    Notes
+    -----
+    Subclasses must implement `build()` to return an AcquisitionFunction that:
+
+    - Inherits from botorch.acquisition.AcquisitionFunction
+    - Implements forward(X: Tensor) -> Tensor
+    - Accepts X with shape (batch, q, d) and returns shape (batch,)
+
+    The reference point should be chosen to be dominated by all points on the
+    Pareto frontier. A common heuristic is to use values slightly worse than
+    the worst observed objective values.
+
+    Examples
+    --------
+    Implementing a custom multi-objective acquisition:
+
+    >>> class MyMOAcquisition(MultiObjectiveAcquisition):
+    ...     def __init__(self, alpha: float = 0.5):
+    ...         self.alpha = alpha
+    ...
+    ...     def build(self, model, X_baseline, Y, ref_point, maximize):
+    ...         return _MyMOAcqf(model, X_baseline, Y, ref_point, maximize, self.alpha)
+
+    Using a multi-objective acquisition in an optimization loop:
+
+    >>> ehvi = ExpectedHypervolumeImprovement()
+    >>> acqf = ehvi.build(
+    ...     model=fitted_mogp,
+    ...     X_baseline=X_observed,
+    ...     Y=Y_observed,
+    ...     ref_point=[0.0, 0.0],
+    ...     maximize=[True, True],
+    ... )
+    >>> # Use acqf with optimize_acqf for gradient-based optimization
+    >>> candidates, acq_values = optimize_acqf(acqf, bounds=bounds, ...)
+
+    Reference: Daulton et al. (2020), Differentiable Expected Hypervolume
+    Improvement for Parallel Multi-Objective Bayesian Optimization.
+    """
+
+    @abstractmethod
+    def build(
+        self,
+        model: Model,
+        X_baseline: torch.Tensor,
+        Y: torch.Tensor,
+        ref_point: list[float],
+        maximize: list[bool],
+    ) -> AcquisitionFunction:
+        """Build a BoTorch-compatible multi-objective acquisition function.
+
+        Constructs an acquisition function instance configured with the builder's
+        hyperparameters and the provided model, observed data, and objective settings.
+
+        Parameters
+        ----------
+        model : Model
+            A fitted BoTorch multi-output model (e.g., ModelListGP or
+            MultiTaskGP) with a posterior() method. The model should predict
+            all objectives and be trained on observed data before calling build().
+        X_baseline : torch.Tensor
+            Observed input points, shape (n_samples, n_features). Used by some
+            acquisition functions (like qNEHVI) to compute the current Pareto
+            frontier and cell decomposition for hypervolume calculation.
+        Y : torch.Tensor
+            Observed objective values, shape (n_samples, n_objectives). Each row
+            contains the objective values for one observation. Used to determine
+            the current Pareto frontier and compute hypervolume improvement.
+        ref_point : list[float]
+            Reference point for hypervolume calculation, length n_objectives.
+            Must be dominated by all Pareto-optimal points (i.e., worse than
+            the worst acceptable objective values). The hypervolume is computed
+            as the volume between the Pareto frontier and this reference point.
+        maximize : list[bool]
+            Optimization direction for each objective, length n_objectives.
+            If maximize[i] is True, objective i is maximized; if False, minimized.
+            Note: BoTorch internally assumes maximization, so objectives to be
+            minimized should be negated before building the acquisition function.
+
+        Returns
+        -------
+        AcquisitionFunction
+            A BoTorch-compatible acquisition function ready for optimization.
+            The returned function:
+            - Has forward(X) accepting shape (batch, q, d)
+            - Returns shape (batch,) with acquisition values
+            - Can be used directly with optimize_acqf
+
+        Examples
+        --------
+        >>> ehvi_builder = ExpectedHypervolumeImprovement()
+        >>> acqf = ehvi_builder.build(
+        ...     model=mogp,
+        ...     X_baseline=torch.tensor([[0.2, 0.3], [0.5, 0.6], [0.8, 0.4]]),
+        ...     Y=torch.tensor([[0.5, 0.3], [0.8, 0.6], [0.4, 0.9]]),
+        ...     ref_point=[0.0, 0.0],
+        ...     maximize=[True, True],
+        ... )
+        >>> # Evaluate acquisition at candidate points
+        >>> X = torch.tensor([[[0.5, 0.5]]])  # shape (1, 1, 2)
+        >>> acq_value = acqf(X)  # shape (1,)
+        """
+        ...
