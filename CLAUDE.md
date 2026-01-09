@@ -136,7 +136,7 @@ Note: `targets/` uses `TYPE_CHECKING` for `Observation` imports to avoid circula
 - **Target**: Extracts scalar optimization target from Observation (direct or derived from outputs)
 - **Recommender**: Suggests next experiments. Implementations: BORecommender, RandomRecommender, GridRecommender
 - **Surrogate**: Model that fits observations. Interface: fit(X, y), predict(X) → (mean, std). SingleTaskGPSurrogate for scalar targets, MultiTaskGPSurrogate for correlated multi-output targets.
-- **Acquisition**: Scores candidate points (internal to recommenders). Interface: evaluate(X, surrogate, best_y) → scores
+- **Acquisition**: Builds BoTorch-compatible acquisition functions (internal to recommenders). Interface: build(model, best_f, maximize) → AcquisitionFunction. The returned function has forward(X) for use with optimize_acqf.
 - **Executor**: Runs experiments. HumanExecutor for manual, ClaudeLightExecutor for autonomous closed-loop
 
 ## Executor Interface
@@ -226,22 +226,22 @@ Write thorough NumPy-style docstrings. Good documentation is not slop. For funct
 
 ```python
 # Good
-def expected_improvement(X: np.ndarray, surrogate: Surrogate, best_y: float) -> np.ndarray:
-    """Compute Expected Improvement scores for candidate points.
+def build(self, model: Model, best_f: float, maximize: bool) -> AcquisitionFunction:
+    """Build a BoTorch-compatible acquisition function.
 
     Parameters
     ----------
-    X : np.ndarray, shape (n_candidates, n_features)
-        Candidate points to evaluate.
-    surrogate : Surrogate
-        Fitted surrogate model with predict(X) -> (mean, std).
-    best_y : float
+    model : Model
+        A fitted BoTorch model (e.g., SingleTaskGP).
+    best_f : float
         Best observed target value so far.
+    maximize : bool
+        If True, seek higher values; if False, seek lower values.
 
     Returns
     -------
-    np.ndarray, shape (n_candidates,)
-        EI score for each candidate point.
+    AcquisitionFunction
+        BoTorch-compatible acquisition function with forward(X) method.
 
     Reference: Jones et al. (1998), Efficient Global Optimization.
     """
@@ -327,10 +327,11 @@ with pytest.raises(ValueError, match="Array shapes must match exactly"):
   - [x] Surrogate ABC with fit/predict (folio/surrogates/base.py)
   - [x] SingleTaskGPSurrogate: BoTorch-based single-output GP (Matérn 2.5, ARD, learned noise)
   - [x] MultiTaskGPSurrogate: BoTorch-based multi-output GP with ICM kernel for correlated outputs
-- [x] Acquisition interface
-  - [x] Acquisition ABC with evaluate/_compute (folio/recommenders/acquisitions/base.py)
-  - [x] ExpectedImprovement: EI with xi parameter, handles maximize/minimize
-  - [x] UpperConfidenceBound: UCB with beta parameter, handles maximize/minimize
+- [x] Acquisition interface (BoTorch-compatible)
+  - [x] Acquisition ABC with build(model, best_f, maximize) → AcquisitionFunction
+  - [x] ExpectedImprovement: EI with xi parameter, returns _EIAcquisition
+  - [x] UpperConfidenceBound: UCB with beta parameter, returns _UCBAcquisition
+  - [x] Inner classes implement forward(X) for use with optimize_acqf
 - [ ] Add images field to Observation
 - [ ] Add procedure, hazards fields to Project
 - [ ] libSQL cloud sync support in Database

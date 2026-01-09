@@ -1,200 +1,95 @@
-"""Abstract base class for acquisition functions."""
+"""Abstract base class for acquisition function builders."""
 
 from abc import ABC, abstractmethod
-from typing import Literal
 
-import numpy as np
+from botorch.acquisition import AcquisitionFunction
+from botorch.models.model import Model
 
 
 class Acquisition(ABC):
-    """Abstract base class for acquisition functions in Bayesian optimization.
+    """Abstract base class for building BoTorch-compatible acquisition functions.
 
-    Acquisition functions score candidate points based on surrogate predictions,
-    balancing exploration (high uncertainty) and exploitation (high predicted value).
-    Higher scores indicate more promising candidates for evaluation.
+    Acquisition instances store hyperparameters (e.g., xi for EI, beta for UCB)
+    and provide a `build()` method that returns a BoTorch AcquisitionFunction ready
+    for use with optimize_acqf.
 
-    The public `evaluate` method handles input validation and delegates to the
-    abstract `_compute` method, which subclasses must implement with the actual
-    scoring logic.
+    The builder pattern separates configuration (hyperparameters) from construction
+    (which requires a fitted model and best observed value). This enables:
+
+    - Reusing the same configuration across multiple optimization iterations
+    - Swapping acquisition functions without changing the optimization loop
+    - Clean separation between user-facing config and BoTorch internals
 
     Notes
     -----
-    Subclasses must implement `_compute` to define the acquisition scoring logic.
-    The `evaluate` method performs all validation, so `_compute` can assume inputs
-    are valid.
+    Subclasses must implement `build()` to return an AcquisitionFunction that:
 
-    Validation performed by `evaluate`:
-
-    - `X.shape[0]` matches `len(mean)` and `len(std)`
-    - `mean` and `std` have matching shapes
-    - `std` values are non-negative
-    - No NaN values in `mean` or `std`
-    - No Inf values in `mean` or `std`
-    - `objective` is either "maximize" or "minimize"
+    - Inherits from botorch.acquisition.AcquisitionFunction
+    - Implements forward(X: Tensor) -> Tensor
+    - Accepts X with shape (batch, q, d) and returns shape (batch,)
 
     Examples
     --------
-    Implementing a custom acquisition function:
+    Implementing a custom acquisition:
 
     >>> class MyAcquisition(Acquisition):
-    ...     def _compute(
-    ...         self,
-    ...         X: np.ndarray,
-    ...         mean: np.ndarray,
-    ...         std: np.ndarray,
-    ...         y_best: float,
-    ...         objective: Literal["maximize", "minimize"],
-    ...     ) -> np.ndarray:
-    ...         # Custom scoring logic here
-    ...         return mean + 2.0 * std  # UCB-like
+    ...     def __init__(self, kappa: float = 2.0):
+    ...         if kappa < 0:
+    ...             raise ValueError("kappa must be non-negative")
+    ...         self.kappa = kappa
+    ...
+    ...     def build(self, model, best_f, maximize):
+    ...         return _MyAcqf(model, best_f, self.kappa, maximize)
 
-    Using an acquisition function:
+    Using an acquisition in an optimization loop:
 
-    >>> acq = MyAcquisition()
-    >>> scores = acq.evaluate(X, mean, std, y_best=0.5, objective="maximize")
-    >>> best_idx = np.argmax(scores)
+    >>> ei = ExpectedImprovement(xi=0.01)
+    >>> acqf = ei.build(model=fitted_gp, best_f=0.5, maximize=True)
+    >>> # Use acqf with optimize_acqf for gradient-based optimization
+    >>> candidates, acq_values = optimize_acqf(acqf, bounds=bounds, ...)
 
     Reference: Frazier (2018), A Tutorial on Bayesian Optimization.
     """
 
-    def evaluate(
-        self,
-        X: np.ndarray,
-        mean: np.ndarray,
-        std: np.ndarray,
-        y_best: float,
-        objective: Literal["maximize", "minimize"],
-    ) -> np.ndarray:
-        """Score candidate points using the acquisition function.
-
-        Validates inputs and delegates to the abstract `_compute` method.
-        Returns scores where higher values indicate more promising candidates.
-
-        Parameters
-        ----------
-        X : np.ndarray, shape (n_candidates, n_features)
-            Candidate points to score. Each row is a candidate point in the
-            input space.
-        mean : np.ndarray, shape (n_candidates,)
-            Predicted mean values from the surrogate model at each candidate.
-        std : np.ndarray, shape (n_candidates,)
-            Predicted standard deviations (uncertainty) from the surrogate
-            model at each candidate. Must be non-negative.
-        y_best : float
-            Best observed target value so far. Used as reference for
-            improvement-based acquisition functions.
-        objective : {"maximize", "minimize"}
-            Optimization direction. "maximize" seeks higher target values,
-            "minimize" seeks lower target values.
-
-        Returns
-        -------
-        np.ndarray, shape (n_candidates,)
-            Acquisition scores for each candidate. Higher scores indicate
-            more promising candidates for evaluation.
-
-        Raises
-        ------
-        ValueError
-            If validation fails:
-
-            - X.shape[0] doesn't match len(mean) or len(std)
-            - mean and std shapes don't match
-            - std contains negative values
-            - mean or std contains NaN values
-            - mean or std contains Inf values
-            - objective is not "maximize" or "minimize"
-
-        Examples
-        --------
-        >>> acq = ExpectedImprovement()
-        >>> X = np.array([[1.0, 2.0], [3.0, 4.0]])
-        >>> mean = np.array([0.5, 0.8])
-        >>> std = np.array([0.1, 0.3])
-        >>> scores = acq.evaluate(X, mean, std, y_best=0.6, objective="maximize")
-        >>> scores.shape
-        (2,)
-        """
-        self._validate(X, mean, std, y_best, objective)
-        return self._compute(X, mean, std, y_best, objective)
-
-    def _validate(
-        self,
-        X: np.ndarray,
-        mean: np.ndarray,
-        std: np.ndarray,
-        y_best: float,
-        objective: Literal["maximize", "minimize"],
-    ) -> None:
-        """validate inputs"""
-        mean_n = mean.shape[0]
-        std_n = std.shape[0]
-        X_n = X.shape[0]
-
-        if mean_n != std_n or mean_n != X_n:
-            raise ValueError(
-                f"shape mismatch: "
-                f"mean vector is length {mean_n} "
-                f"but std vector is length {std_n} "
-                f"and X have {X_n} rows"
-            )
-        if objective not in {"maximize", "minimize"}:
-            raise ValueError(f"Unknown objective: {objective}")
-        if np.isnan(mean).any() or np.isnan(std).any():
-            raise ValueError("NaNs encountered in mean/std")
-        if np.isinf(mean).any() or np.isinf(std).any():
-            raise ValueError("Infs encountered in mean/std")
-        if (std < 0).any():
-            raise ValueError("negative values of std")
-
     @abstractmethod
-    def _compute(
+    def build(
         self,
-        X: np.ndarray,
-        mean: np.ndarray,
-        std: np.ndarray,
-        y_best: float,
-        objective: Literal["maximize", "minimize"],
-    ) -> np.ndarray:
-        """Compute acquisition scores for validated inputs.
+        model: Model,
+        best_f: float,
+        maximize: bool,
+    ) -> AcquisitionFunction:
+        """Build a BoTorch-compatible acquisition function.
 
-        This method contains the actual acquisition function logic. It is called
-        by `evaluate` after all input validation has passed, so implementations
-        can assume inputs are valid.
+        Constructs an acquisition function instance configured with the builder's
+        hyperparameters and the provided model/best_f/maximize settings.
 
         Parameters
         ----------
-        X : np.ndarray, shape (n_candidates, n_features)
-            Candidate points to score (validated).
-        mean : np.ndarray, shape (n_candidates,)
-            Predicted mean values (validated, no NaN/Inf).
-        std : np.ndarray, shape (n_candidates,)
-            Predicted standard deviations (validated, non-negative, no NaN/Inf).
-        y_best : float
-            Best observed target value so far.
-        objective : {"maximize", "minimize"}
-            Optimization direction (validated).
+        model : Model
+            A fitted BoTorch model (e.g., SingleTaskGP) with a posterior() method.
+            The model should be trained on observed data before calling build().
+        best_f : float
+            Best observed target value so far. Used by improvement-based acquisition
+            functions (like EI) as the reference point for computing improvement.
+        maximize : bool
+            If True, optimize to find higher target values.
+            If False, optimize to find lower target values.
 
         Returns
         -------
-        np.ndarray, shape (n_candidates,)
-            Acquisition scores. Higher = more promising.
-
-        Notes
-        -----
-        Implementations should handle the `objective` parameter to correctly
-        score candidates whether maximizing or minimizing. For improvement-based
-        functions, "maximize" means improvement is (mean - y_best) while
-        "minimize" means improvement is (y_best - mean).
+        AcquisitionFunction
+            A BoTorch-compatible acquisition function ready for optimization.
+            The returned function:
+            - Has forward(X) accepting shape (batch, q, d)
+            - Returns shape (batch,) with acquisition values
+            - Can be used directly with optimize_acqf
 
         Examples
         --------
-        A simple UCB implementation:
-
-        >>> def _compute(self, X, mean, std, y_best, objective):
-        ...     if objective == "maximize":
-        ...         return mean + self.kappa * std
-        ...     else:
-        ...         return -mean + self.kappa * std
+        >>> ei_builder = ExpectedImprovement(xi=0.01)
+        >>> acqf = ei_builder.build(model=gp, best_f=1.5, maximize=True)
+        >>> # Evaluate acquisition at candidate points
+        >>> X = torch.tensor([[[0.5, 0.5]]])  # shape (1, 1, 2)
+        >>> acq_value = acqf(X)  # shape (1,)
         """
         ...
