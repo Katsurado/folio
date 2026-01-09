@@ -21,7 +21,7 @@ def simple_project():
             InputSpec("x2", "continuous", bounds=(-5.0, 5.0)),
         ],
         outputs=[OutputSpec("y")],
-        target_config=TargetConfig("y", mode="maximize"),
+        target_config=TargetConfig(objective="y", objective_mode="maximize"),
         recommender_config=RecommenderConfig(type="random"),
     )
 
@@ -34,7 +34,7 @@ def single_input_project():
         name="single_input",
         inputs=[InputSpec("x", "continuous", bounds=(0.0, 1.0))],
         outputs=[OutputSpec("y")],
-        target_config=TargetConfig("y", mode="maximize"),
+        target_config=TargetConfig(objective="y", objective_mode="maximize"),
     )
 
 
@@ -229,7 +229,7 @@ class TestRandomRecommenderRecommendFromData:
             name="many_inputs",
             inputs=inputs,
             outputs=[OutputSpec("y")],
-            target_config=TargetConfig("y"),
+            target_config=TargetConfig(objective="y"),
         )
         recommender = RandomRecommender(project)
         # Shape (2, 10) for 10 dimensions
@@ -292,7 +292,7 @@ class TestRandomRecommenderEdgeCases:
             name="narrow",
             inputs=[InputSpec("x", "continuous", bounds=(0.5, 0.50001))],
             outputs=[OutputSpec("y")],
-            target_config=TargetConfig("y"),
+            target_config=TargetConfig(objective="y"),
         )
         recommender = RandomRecommender(project)
         result = recommender.recommend([])
@@ -305,7 +305,7 @@ class TestRandomRecommenderEdgeCases:
             name="negative",
             inputs=[InputSpec("x", "continuous", bounds=(-100.0, -50.0))],
             outputs=[OutputSpec("y")],
-            target_config=TargetConfig("y"),
+            target_config=TargetConfig(objective="y"),
         )
         recommender = RandomRecommender(project)
         result = recommender.recommend([])
@@ -318,7 +318,7 @@ class TestRandomRecommenderEdgeCases:
             name="large",
             inputs=[InputSpec("x", "continuous", bounds=(0.0, 1e6))],
             outputs=[OutputSpec("y")],
-            target_config=TargetConfig("y"),
+            target_config=TargetConfig(objective="y"),
         )
         recommender = RandomRecommender(project)
         result = recommender.recommend([])
@@ -334,7 +334,7 @@ class TestRandomRecommenderEdgeCases:
             name="many_inputs",
             inputs=inputs,
             outputs=[OutputSpec("y")],
-            target_config=TargetConfig("y"),
+            target_config=TargetConfig(objective="y"),
         )
         recommender = RandomRecommender(project)
         result = recommender.recommend([])

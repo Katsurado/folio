@@ -22,7 +22,7 @@ def simple_project():
             InputSpec("x2", "continuous", bounds=(-5.0, 5.0)),
         ],
         outputs=[OutputSpec("y")],
-        target_config=TargetConfig("y", mode="maximize"),
+        target_config=TargetConfig(objective="y", objective_mode="maximize"),
         recommender_config=RecommenderConfig(
             type="bayesian",
             surrogate="gp",
@@ -43,7 +43,7 @@ def minimize_project():
             InputSpec("x2", "continuous", bounds=(-5.0, 5.0)),
         ],
         outputs=[OutputSpec("y")],
-        target_config=TargetConfig("y", mode="minimize"),
+        target_config=TargetConfig(objective="y", objective_mode="minimize"),
         recommender_config=RecommenderConfig(
             type="bayesian",
             surrogate="gp",
@@ -64,7 +64,7 @@ def ucb_project():
             InputSpec("x2", "continuous", bounds=(-5.0, 5.0)),
         ],
         outputs=[OutputSpec("y")],
-        target_config=TargetConfig("y", mode="maximize"),
+        target_config=TargetConfig(objective="y", objective_mode="maximize"),
         recommender_config=RecommenderConfig(
             type="bayesian",
             surrogate="gp",
@@ -83,7 +83,7 @@ def single_input_project():
         name="single_input",
         inputs=[InputSpec("x", "continuous", bounds=(0.0, 1.0))],
         outputs=[OutputSpec("y")],
-        target_config=TargetConfig("y", mode="maximize"),
+        target_config=TargetConfig(objective="y", objective_mode="maximize"),
         recommender_config=RecommenderConfig(n_initial=2),
     )
 
@@ -426,7 +426,7 @@ class TestBayesianRecommenderAcquisitionEI:
                 InputSpec("x2", "continuous", bounds=(-5.0, 5.0)),
             ],
             outputs=[OutputSpec("y")],
-            target_config=TargetConfig("y", mode="maximize"),
+            target_config=TargetConfig(objective="y", objective_mode="maximize"),
             recommender_config=RecommenderConfig(
                 type="bayesian",
                 acquisition="ei",
@@ -543,7 +543,7 @@ class TestBayesianRecommenderEdgeCases:
             name="many_inputs",
             inputs=inputs,
             outputs=[OutputSpec("y")],
-            target_config=TargetConfig("y"),
+            target_config=TargetConfig(objective="y"),
             recommender_config=RecommenderConfig(n_initial=3),
         )
         observations = [
@@ -637,7 +637,7 @@ class TestBayesianRecommenderKwargsPassthrough:
             name="ei_project",
             inputs=[InputSpec("x", "continuous", bounds=(0.0, 1.0))],
             outputs=[OutputSpec("y")],
-            target_config=TargetConfig("y"),
+            target_config=TargetConfig(objective="y"),
             recommender_config=RecommenderConfig(
                 acquisition="ei",
                 acquisition_kwargs={"xi": 0.5},
@@ -660,7 +660,7 @@ class TestBayesianRecommenderKwargsPassthrough:
             name="ucb_project",
             inputs=[InputSpec("x", "continuous", bounds=(0.0, 1.0))],
             outputs=[OutputSpec("y")],
-            target_config=TargetConfig("y"),
+            target_config=TargetConfig(objective="y"),
             recommender_config=RecommenderConfig(
                 acquisition="ucb",
                 acquisition_kwargs={"beta": 3.0},
@@ -683,7 +683,7 @@ class TestBayesianRecommenderKwargsPassthrough:
             name="ei_default",
             inputs=[InputSpec("x", "continuous", bounds=(0.0, 1.0))],
             outputs=[OutputSpec("y")],
-            target_config=TargetConfig("y"),
+            target_config=TargetConfig(objective="y"),
             recommender_config=RecommenderConfig(acquisition="ei"),
         )
         recommender = BayesianRecommender(project)
@@ -703,7 +703,7 @@ class TestBayesianRecommenderKwargsPassthrough:
             name="ucb_default",
             inputs=[InputSpec("x", "continuous", bounds=(0.0, 1.0))],
             outputs=[OutputSpec("y")],
-            target_config=TargetConfig("y"),
+            target_config=TargetConfig(objective="y"),
             recommender_config=RecommenderConfig(acquisition="ucb"),
         )
         recommender = BayesianRecommender(project)
@@ -743,7 +743,7 @@ class TestBayesianRecommenderSurrogateConfig:
                 InputSpec("x2", "continuous", bounds=(-5.0, 5.0)),
             ],
             outputs=[OutputSpec("y")],
-            target_config=TargetConfig("y", mode="maximize"),
+            target_config=TargetConfig(objective="y", objective_mode="maximize"),
             recommender_config=RecommenderConfig(
                 type="bayesian",
                 surrogate="multitask_gp",

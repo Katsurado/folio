@@ -17,7 +17,7 @@ def sample_project():
             InputSpec(name="solvent", type="categorical", levels=["water", "ethanol"]),
         ],
         outputs=[OutputSpec(name="yield")],
-        target_config=TargetConfig(name="yield"),
+        target_config=TargetConfig(objective="yield"),
     )
 
 
@@ -92,7 +92,7 @@ class TestGetOptimizationBounds:
             name="test",
             inputs=[InputSpec("x", "continuous", bounds=(0.0, 1.0))],
             outputs=[OutputSpec("y")],
-            target_config=TargetConfig("y"),
+            target_config=TargetConfig(objective="y"),
         )
         result = project.get_optimization_bounds()
         assert isinstance(result, np.ndarray)
@@ -104,7 +104,7 @@ class TestGetOptimizationBounds:
             name="test",
             inputs=[InputSpec("x", "continuous", bounds=(0.0, 1.0))],
             outputs=[OutputSpec("y")],
-            target_config=TargetConfig("y"),
+            target_config=TargetConfig(objective="y"),
         )
         result = project.get_optimization_bounds()
         assert result.shape == (2, 1)
@@ -120,7 +120,7 @@ class TestGetOptimizationBounds:
                 InputSpec("x3", "continuous", bounds=(100.0, 200.0)),
             ],
             outputs=[OutputSpec("y")],
-            target_config=TargetConfig("y"),
+            target_config=TargetConfig(objective="y"),
         )
         result = project.get_optimization_bounds()
         assert result.shape == (2, 3)
@@ -135,7 +135,7 @@ class TestGetOptimizationBounds:
                 InputSpec("x2", "continuous", bounds=(-5.0, 5.0)),
             ],
             outputs=[OutputSpec("y")],
-            target_config=TargetConfig("y"),
+            target_config=TargetConfig(objective="y"),
         )
         result = project.get_optimization_bounds()
         np.testing.assert_array_equal(result[0, :], [0.0, -5.0])
@@ -150,7 +150,7 @@ class TestGetOptimizationBounds:
                 InputSpec("x2", "continuous", bounds=(-5.0, 5.0)),
             ],
             outputs=[OutputSpec("y")],
-            target_config=TargetConfig("y"),
+            target_config=TargetConfig(objective="y"),
         )
         result = project.get_optimization_bounds()
         np.testing.assert_array_equal(result[1, :], [10.0, 5.0])
@@ -174,7 +174,7 @@ class TestGetOptimizationBounds:
                 InputSpec("c", "continuous", bounds=(5.0, 6.0)),
             ],
             outputs=[OutputSpec("y")],
-            target_config=TargetConfig("y"),
+            target_config=TargetConfig(objective="y"),
         )
         result = project.get_optimization_bounds()
         np.testing.assert_array_equal(result[0, :], [1.0, 3.0, 5.0])
@@ -193,7 +193,7 @@ class TestGetOptimizationBounds:
                 InputSpec("x3", "continuous", bounds=(4.0, 5.0)),
             ],
             outputs=[OutputSpec("y")],
-            target_config=TargetConfig("y"),
+            target_config=TargetConfig(objective="y"),
         )
         result = project.get_optimization_bounds()
         assert result.shape == (2, 3)
@@ -207,7 +207,7 @@ class TestGetOptimizationBounds:
             name="test",
             inputs=[InputSpec("x", "continuous", bounds=(-100.0, -50.0))],
             outputs=[OutputSpec("y")],
-            target_config=TargetConfig("y"),
+            target_config=TargetConfig(objective="y"),
         )
         result = project.get_optimization_bounds()
         np.testing.assert_array_equal(result, [[-100.0], [-50.0]])
@@ -219,7 +219,7 @@ class TestGetOptimizationBounds:
             name="test",
             inputs=[InputSpec("x", "continuous", bounds=(0.0, 1e6))],
             outputs=[OutputSpec("y")],
-            target_config=TargetConfig("y"),
+            target_config=TargetConfig(objective="y"),
         )
         result = project.get_optimization_bounds()
         np.testing.assert_array_equal(result, [[0.0], [1e6]])

@@ -62,7 +62,7 @@ class Project:
     ...         InputSpec("solvent", "categorical", levels=["water", "ethanol"]),
     ...     ],
     ...     outputs=[OutputSpec("yield"), OutputSpec("purity")],
-    ...     target_config=TargetConfig("yield", mode="maximize"),
+    ...     target_config=TargetConfig(objective="yield", objective_mode="maximize"),
     ... )
     """
 
@@ -131,9 +131,9 @@ class Project:
         # Validate target references a valid output for direct targets
         if self.target_config.target_type == "direct":
             output_names_set = set(output_names)
-            if self.target_config.name not in output_names_set:
+            if self.target_config.objective not in output_names_set:
                 raise InvalidSchemaError(
-                    f"Target '{self.target_config.name}' not in outputs. "
+                    f"Target '{self.target_config.objective}' not in outputs. "
                     f"Available: {output_names}"
                 )
 
@@ -276,7 +276,7 @@ class Project:
         ...         InputSpec("x2", "continuous", bounds=(-5.0, 5.0)),
         ...     ],
         ...     outputs=[OutputSpec("y")],
-        ...     target_config=TargetConfig("y"),
+        ...     target_config=TargetConfig(objective="y"),
         ... )
         >>> project.get_optimization_bounds()
         array([[ 0., -5.],
@@ -313,13 +313,17 @@ class Project:
         """
         config = self.target_config
         if config.target_type == "direct":
-            return DirectTarget(config.name, config.mode)
+            return DirectTarget(config.objective, config.objective_mode)
         elif config.target_type == "ratio":
-            return RatioTarget(config.numerator, config.denominator, config.mode)
+            return RatioTarget(
+                config.numerator, config.denominator, config.objective_mode
+            )
         elif config.target_type == "difference":
-            return DifferenceTarget(config.first, config.second, config.mode)
+            return DifferenceTarget(config.first, config.second, config.objective_mode)
         elif config.target_type == "slope":
-            return SlopeTarget(config.slope_outputs, config.slope_x, config.mode)
+            return SlopeTarget(
+                config.slope_outputs, config.slope_x, config.objective_mode
+            )
         else:
             raise ValueError(f"Unknown target type: {config.target_type}")
 

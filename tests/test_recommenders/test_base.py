@@ -59,7 +59,7 @@ def simple_project():
             InputSpec("x2", "continuous", bounds=(-5.0, 5.0)),
         ],
         outputs=[OutputSpec("y")],
-        target_config=TargetConfig("y", mode="maximize"),
+        target_config=TargetConfig(objective="y", objective_mode="maximize"),
         recommender_config=RecommenderConfig(),
     )
 
@@ -263,7 +263,7 @@ class TestRecommendMethod:
                 InputSpec("x2", "continuous", bounds=(-5.0, 5.0)),
             ],
             outputs=[OutputSpec("y")],
-            target_config=TargetConfig("y", mode="minimize"),
+            target_config=TargetConfig(objective="y", objective_mode="minimize"),
         )
         recommender = ConcreteRecommender(project)
         recommender.recommend(sample_observations)
@@ -381,7 +381,7 @@ class TestRecommendSingleInput:
             name="single_input",
             inputs=[InputSpec("x", "continuous", bounds=(0.0, 1.0))],
             outputs=[OutputSpec("y")],
-            target_config=TargetConfig("y"),
+            target_config=TargetConfig(objective="y"),
         )
         observations = [
             Observation(project_id=1, inputs={"x": 0.5}, outputs={"y": 1.0}),
@@ -398,7 +398,7 @@ class TestRecommendSingleInput:
             name="single_input",
             inputs=[InputSpec("x", "continuous", bounds=(0.0, 1.0))],
             outputs=[OutputSpec("y")],
-            target_config=TargetConfig("y"),
+            target_config=TargetConfig(objective="y"),
         )
         observations = [
             Observation(project_id=1, inputs={"x": 0.2}, outputs={"y": 1.0}),
@@ -423,7 +423,7 @@ class TestRecommendManyInputs:
             name="many_inputs",
             inputs=inputs,
             outputs=[OutputSpec("y")],
-            target_config=TargetConfig("y"),
+            target_config=TargetConfig(objective="y"),
         )
         observations = [
             Observation(
@@ -447,7 +447,7 @@ class TestRecommendManyInputs:
             name="many_inputs",
             inputs=inputs,
             outputs=[OutputSpec("y")],
-            target_config=TargetConfig("y"),
+            target_config=TargetConfig(objective="y"),
         )
         observations = [
             Observation(
