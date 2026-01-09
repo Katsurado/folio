@@ -683,9 +683,12 @@ class TestMultiTaskGPSurrogateVsReference:
         X, y = correlated_data
         X_test = np.array([[0.15], [0.35], [0.55], [0.85]])
 
+        # Set seed for reproducible hyperparameter optimization
+        torch.manual_seed(42)
         gp = MultiTaskGPSurrogate().fit(X, y)
         mean_ours, std_ours = gp.predict(X_test)
 
+        torch.manual_seed(42)
         ref_model = _fit_reference_botorch_multitask_gp(X, y)
         mean_ref, std_ref = _predict_reference_botorch_multitask_gp(
             ref_model, X_test, n_tasks=2
@@ -698,9 +701,12 @@ class TestMultiTaskGPSurrogateVsReference:
         """Output matches BoTorch when predicting at training points."""
         X, y = correlated_data
 
+        # Set seed for reproducible hyperparameter optimization
+        torch.manual_seed(42)
         gp = MultiTaskGPSurrogate().fit(X, y)
         mean_ours, std_ours = gp.predict(X)
 
+        torch.manual_seed(42)
         ref_model = _fit_reference_botorch_multitask_gp(X, y)
         mean_ref, std_ref = _predict_reference_botorch_multitask_gp(
             ref_model, X, n_tasks=2
@@ -714,9 +720,12 @@ class TestMultiTaskGPSurrogateVsReference:
         X, y = three_task_data
         X_test = np.array([[0.15], [0.55]])
 
+        # Set seed for reproducible hyperparameter optimization
+        torch.manual_seed(42)
         gp = MultiTaskGPSurrogate().fit(X, y)
         mean_ours, std_ours = gp.predict(X_test)
 
+        torch.manual_seed(42)
         ref_model = _fit_reference_botorch_multitask_gp(X, y)
         mean_ref, std_ref = _predict_reference_botorch_multitask_gp(
             ref_model, X_test, n_tasks=3
@@ -750,11 +759,14 @@ class TestMultiTaskGPSurrogateVsReference:
         y = np.array([[0.0, 1.0], [0.5, 0.5], [1.0, 0.0]])
         X_test = np.array([[0.25], [0.75]])
 
+        # Set seed for reproducible hyperparameter optimization
+        torch.manual_seed(42)
         gp = MultiTaskGPSurrogate(normalize_inputs=False, normalize_outputs=False).fit(
             X, y
         )
         mean_ours, std_ours = gp.predict(X_test)
 
+        torch.manual_seed(42)
         ref_model = _fit_reference_botorch_multitask_gp(
             X, y, normalize_inputs=False, normalize_outputs=False
         )
@@ -770,9 +782,12 @@ class TestMultiTaskGPSurrogateVsReference:
         X, y = correlated_data
         X_test = np.array([[-0.5], [1.5]])
 
+        # Set seed for reproducible hyperparameter optimization
+        torch.manual_seed(42)
         gp = MultiTaskGPSurrogate().fit(X, y)
         mean_ours, std_ours = gp.predict(X_test)
 
+        torch.manual_seed(42)
         ref_model = _fit_reference_botorch_multitask_gp(X, y)
         mean_ref, std_ref = _predict_reference_botorch_multitask_gp(
             ref_model, X_test, n_tasks=2
@@ -791,9 +806,12 @@ class TestMultiTaskGPSurrogateVsReferenceEdgeCases:
         y = np.array([[1e6, 2e6], [1.5e6, 2.5e6], [2e6, 3e6]])
         X_test = np.array([[0.25], [0.75]])
 
+        # Set seed for reproducible hyperparameter optimization
+        torch.manual_seed(42)
         gp = MultiTaskGPSurrogate().fit(X, y)
         mean_ours, std_ours = gp.predict(X_test)
 
+        torch.manual_seed(42)
         ref_model = _fit_reference_botorch_multitask_gp(X, y)
         mean_ref, std_ref = _predict_reference_botorch_multitask_gp(
             ref_model, X_test, n_tasks=2
