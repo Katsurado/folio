@@ -155,12 +155,12 @@ Note: `targets/` uses `TYPE_CHECKING` for `Observation` imports to avoid circula
 
 ## Key Abstractions
 
-- **Project**: Experiment schema (inputs, outputs, target config, recommender config, procedure, hazards)
+- **Project**: Experiment schema (inputs, outputs, target_configs list, reference_point, recommender_config). Supports single and multi-objective via `is_multi_objective()`.
 - **Observation**: Single data point (inputs dict, outputs dict, timestamp, notes, tag, images, failed)
 - **Target**: Extracts scalar optimization target from Observation (direct or derived from outputs)
-- **Recommender**: Suggests next experiments. Interface: recommend(observations) → dict, recommend_from_data(X, y, bounds, objective) → np.ndarray. Implementations: BayesianRecommender, RandomRecommender
-- **Surrogate**: Model that fits observations. Interface: fit(X, y), predict(X) → (mean, std). SingleTaskGPSurrogate for scalar targets, MultiTaskGPSurrogate for correlated multi-output targets.
-- **Acquisition**: Builds BoTorch-compatible acquisition functions (internal to recommenders). Interface: build(model, best_f, maximize) → AcquisitionFunction. The returned function has forward(X) for use with optimize_acqf.
+- **Recommender**: Suggests next experiments. Interface: `recommend(observations) → dict`, `recommend_from_data(X, y, bounds, objective) → np.ndarray`. Implementations: BayesianRecommender, RandomRecommender
+- **Surrogate**: Model that fits observations. Interface: `fit(X, y)`, `predict(X) → (mean, std)`. SingleTaskGPSurrogate for single-output (y shape (n, 1)), MultiTaskGPSurrogate for correlated multi-output.
+- **Acquisition**: Single-objective (EI, UCB) and multi-objective (NEHVI, ParEGO). Internal to recommenders.
 - **Executor**: Runs experiments. HumanExecutor for manual, ClaudeLightExecutor for autonomous closed-loop
 
 ## Executor Interface
@@ -206,9 +206,9 @@ User enters observation (inputs, outputs)
         ↓
     Store in SQLite/libSQL
         ↓
-    Target.compute(observation) → scalar y
+    Target.compute(observation) → scalar y per target
         ↓
-    Surrogate.fit(X, y)
+    Surrogate.fit(X, Y)  # Y shape (n, m) for m objectives
         ↓
     Recommender.recommend() → next inputs
         ↓
@@ -336,38 +336,28 @@ with pytest.raises(ValueError, match="Array shapes must match exactly"):
 - [x] Data layer (Project, Observation, SQLite CRUD)
   - [x] Schema: InputSpec, OutputSpec, ConstantSpec with validation
   - [x] Observation with validation, timestamp default, failed flag
-  - [x] Project with TargetConfig, RecommenderConfig, validation
+  - [x] Project with target_configs (list), reference_point, recommender_config
+  - [x] Project.is_multi_objective() for single vs multi-objective detection
   - [x] Database: create/get/delete project, add/get observations
-  - [x] Project.get_training_data() extracts X, y arrays from observations
+  - [ ] Project.get_training_data() - prototype, needs implementation
 - [x] Target interface
-  - [x] ScalarTarget abstract base class (folio/targets/base.py)
-  - [x] DirectTarget: extracts single output value
-  - [x] DerivedTarget: computes via custom function
-  - [x] RatioTarget: numerator / denominator
-  - [x] DifferenceTarget: first - second
-  - [x] DistanceTarget: euclidean/mse/mae distance to target values
-  - [x] SlopeTarget: linear fit slope across multiple outputs
+  - [x] ScalarTarget ABC, DirectTarget, DerivedTarget, RatioTarget, DifferenceTarget, DistanceTarget, SlopeTarget
 - [x] Surrogate interface
-  - [x] Surrogate ABC with fit/predict (folio/surrogates/base.py)
-  - [x] SingleTaskGPSurrogate: BoTorch-based single-output GP (Matérn 2.5, ARD, learned noise)
-  - [x] MultiTaskGPSurrogate: BoTorch-based multi-output GP with ICM kernel for correlated outputs
+  - [x] Surrogate ABC with fit/predict
+  - [x] SingleTaskGPSurrogate: BoTorch single-output GP, y shape (n, 1)
+  - [x] MultiTaskGPSurrogate: BoTorch multi-output GP with ICM kernel
 - [x] Acquisition interface (BoTorch-compatible)
-  - [x] Acquisition ABC with build(model, best_f, maximize) → AcquisitionFunction
-  - [x] ExpectedImprovement: EI with xi parameter, returns _EIAcquisition
-  - [x] UpperConfidenceBound: UCB with beta parameter, returns _UCBAcquisition
-  - [x] Inner classes implement forward(X) for use with optimize_acqf
-- [x] Recommender interface (prototypes with tests, awaiting implementation)
-  - [x] Recommender ABC with recommend(observations) and recommend_from_data(X, y, bounds, objective)
-  - [x] BayesianRecommender: GP surrogate + acquisition optimization (prototype)
-  - [x] RandomRecommender: uniform sampling within bounds (prototype)
-  - [x] Project.get_optimization_bounds() returns (2, d) array for BoTorch
+  - [x] Single-objective: ExpectedImprovement, UpperConfidenceBound
+  - [x] Multi-objective: NEHVI (qLogNoisyExpectedHypervolumeImprovement), ParEGO
+- [x] Recommender interface
+  - [x] Recommender ABC with recommend() and recommend_from_data()
+  - [x] RandomRecommender: uniform sampling within bounds
+  - [ ] BayesianRecommender: prototype, _build_surrogate/acquisition_for_project need implementation
 - [ ] Add images field to Observation
 - [ ] Add procedure, hazards fields to Project
 - [ ] libSQL cloud sync support in Database
 - [ ] GridRecommender
-- [ ] Executor interface
-  - [ ] HumanExecutor
-  - [ ] ClaudeLightExecutor
+- [ ] Executor interface (HumanExecutor, ClaudeLightExecutor)
 - [ ] Export to PDF via Quarto
 - [ ] Streamlit UI
 
