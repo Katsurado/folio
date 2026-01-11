@@ -10,7 +10,7 @@ from botorch.models.transforms.outcome import Standardize
 from gpytorch.mlls.sum_marginal_log_likelihood import SumMarginalLogLikelihood
 
 from folio.recommenders.acquisitions import (
-    EHVI,
+    NEHVI,
     MultiObjectiveAcquisition,
     ParEGO,
 )
@@ -85,66 +85,112 @@ def maximize_both():
 
 
 # =============================================================================
-# EHVI Init Tests
+# _prepare_for_maximization Tests
 # =============================================================================
 
 
-class TestEHVIInit:
-    """Tests for EHVI.__init__."""
+class TestPrepareForMaximization:
+    """Tests for MultiObjectiveAcquisition._prepare_for_maximization helper."""
+
+    def test_all_maximize_unchanged(self):
+        """Test with all maximize=True: Y and ref_point unchanged."""
+        nehvi = NEHVI()
+        Y = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+        ref_point = [0.0, 0.5]
+        maximize = [True, True]
+
+        Y_max, ref_max = nehvi._prepare_for_maximization(Y, ref_point, maximize)
+
+        torch.testing.assert_close(Y_max, Y)
+        assert ref_max == [0.0, 0.5]
+
+    def test_all_minimize_all_negated(self):
+        """Test with all maximize=False: all values negated."""
+        nehvi = NEHVI()
+        Y = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+        ref_point = [0.0, 0.5]
+        maximize = [False, False]
+
+        Y_max, ref_max = nehvi._prepare_for_maximization(Y, ref_point, maximize)
+
+        expected_Y = torch.tensor([[-1.0, -2.0], [-3.0, -4.0]])
+        torch.testing.assert_close(Y_max, expected_Y)
+        assert ref_max == [-0.0, -0.5]
+
+    def test_mixed_maximize_only_appropriate_negated(self):
+        """Test with mixed maximize: only minimize columns negated."""
+        nehvi = NEHVI()
+        Y = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        ref_point = [0.1, 0.2, 0.3]
+        maximize = [True, False, True]
+
+        Y_max, ref_max = nehvi._prepare_for_maximization(Y, ref_point, maximize)
+
+        # Only column 1 should be negated
+        expected_Y = torch.tensor([[1.0, -2.0, 3.0], [4.0, -5.0, 6.0]])
+        torch.testing.assert_close(Y_max, expected_Y)
+        assert ref_max == [0.1, -0.2, 0.3]
+
+    def test_original_tensors_not_modified(self):
+        """Test that original Y is not modified (returns a copy)."""
+        nehvi = NEHVI()
+        Y_original = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+        Y_copy = Y_original.clone()
+        ref_point = [0.0, 0.0]
+        maximize = [False, False]
+
+        nehvi._prepare_for_maximization(Y_original, ref_point, maximize)
+
+        # Original should be unchanged
+        torch.testing.assert_close(Y_original, Y_copy)
+
+    def test_original_ref_point_not_modified(self):
+        """Test that original ref_point list is not modified."""
+        nehvi = NEHVI()
+        Y = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+        ref_point = [0.5, 0.5]
+        ref_point_copy = list(ref_point)
+        maximize = [False, False]
+
+        nehvi._prepare_for_maximization(Y, ref_point, maximize)
+
+        assert ref_point == ref_point_copy
+
+
+# =============================================================================
+# NEHVI Init Tests
+# =============================================================================
+
+
+class TestNEHVIInit:
+    """Tests for NEHVI.__init__."""
 
     def test_default_alpha(self):
         """Test default alpha value is 0.0."""
-        ehvi = EHVI()
-        assert ehvi.alpha == 0.0
-
-    def test_default_prune_baseline(self):
-        """Test default prune_baseline is True."""
-        ehvi = EHVI()
-        assert ehvi.prune_baseline is True
-
-    def test_default_cache_root(self):
-        """Test default cache_root is True."""
-        ehvi = EHVI()
-        assert ehvi.cache_root is True
+        nehvi = NEHVI()
+        assert nehvi.alpha == 0.0
 
     def test_custom_alpha(self):
         """Test custom alpha value is stored."""
-        ehvi = EHVI(alpha=0.1)
-        assert ehvi.alpha == 0.1
-
-    def test_custom_prune_baseline(self):
-        """Test custom prune_baseline value is stored."""
-        ehvi = EHVI(prune_baseline=False)
-        assert ehvi.prune_baseline is False
-
-    def test_custom_cache_root(self):
-        """Test custom cache_root value is stored."""
-        ehvi = EHVI(cache_root=False)
-        assert ehvi.cache_root is False
-
-    def test_all_custom_params(self):
-        """Test all custom parameters are stored correctly."""
-        ehvi = EHVI(alpha=0.05, prune_baseline=False, cache_root=False)
-        assert ehvi.alpha == 0.05
-        assert ehvi.prune_baseline is False
-        assert ehvi.cache_root is False
+        nehvi = NEHVI(alpha=0.1)
+        assert nehvi.alpha == 0.1
 
 
 # =============================================================================
-# EHVI Build Tests
+# NEHVI Build Tests
 # =============================================================================
 
 
-class TestEHVIBuild:
-    """Tests for EHVI.build method."""
+class TestNEHVIBuild:
+    """Tests for NEHVI.build method."""
 
-    @pytest.mark.skip(reason="EHVI.build not yet implemented")
+    @pytest.mark.skip(reason="NEHVI.build not yet implemented")
     def test_returns_acquisition_function(
         self, fitted_mogp, X_baseline, Y_baseline, ref_point_max, maximize_both
     ):
         """Test build returns a callable acquisition function."""
-        ehvi = EHVI()
-        acqf = ehvi.build(
+        nehvi = NEHVI()
+        acqf = nehvi.build(
             model=fitted_mogp,
             X_baseline=X_baseline,
             Y=Y_baseline,
@@ -159,17 +205,17 @@ class TestEHVIBuild:
         assert isinstance(result, torch.Tensor)
         assert result.shape == (1,)
 
-    @pytest.mark.skip(reason="EHVI.build not yet implemented")
+    @pytest.mark.skip(reason="NEHVI.build not yet implemented")
     def test_output_is_nonnegative(
         self, fitted_mogp, X_baseline, Y_baseline, ref_point_max, maximize_both
     ):
-        """Test that EHVI returns non-negative values.
+        """Test that NEHVI returns non-negative values.
 
         Hypervolume improvement is always non-negative since we can only
         increase or maintain the dominated hypervolume.
         """
-        ehvi = EHVI()
-        acqf = ehvi.build(
+        nehvi = NEHVI()
+        acqf = nehvi.build(
             model=fitted_mogp,
             X_baseline=X_baseline,
             Y=Y_baseline,
@@ -184,16 +230,16 @@ class TestEHVIBuild:
         )
         results = torch.stack([acqf(x) for x in X])
 
-        # EHVI should be non-negative
+        # NEHVI should be non-negative
         assert (results >= -1e-10).all()
 
-    @pytest.mark.skip(reason="EHVI.build not yet implemented")
+    @pytest.mark.skip(reason="NEHVI.build not yet implemented")
     def test_output_is_finite(
         self, fitted_mogp, X_baseline, Y_baseline, ref_point_max, maximize_both
     ):
-        """Test that EHVI output contains no NaN or Inf values."""
-        ehvi = EHVI()
-        acqf = ehvi.build(
+        """Test that NEHVI output contains no NaN or Inf values."""
+        nehvi = NEHVI()
+        acqf = nehvi.build(
             model=fitted_mogp,
             X_baseline=X_baseline,
             Y=Y_baseline,
@@ -212,24 +258,24 @@ class TestEHVIBuild:
 
 
 # =============================================================================
-# EHVI Directional Tests
+# NEHVI Directional Tests
 # =============================================================================
 
 
-class TestEHVIDirectional:
-    """Directional behavior tests for EHVI."""
+class TestNEHVIDirectional:
+    """Directional behavior tests for NEHVI."""
 
-    @pytest.mark.skip(reason="EHVI.build not yet implemented")
-    def test_pareto_improving_point_has_positive_ehvi(
+    @pytest.mark.skip(reason="NEHVI.build not yet implemented")
+    def test_pareto_improving_point_has_positive_nehvi(
         self, fitted_mogp, X_baseline, Y_baseline, ref_point_max, maximize_both
     ):
-        """Test that a point improving the Pareto frontier has positive EHVI.
+        """Test that a point improving the Pareto frontier has positive NEHVI.
 
         A point that dominates or extends the current Pareto frontier should
         have positive expected hypervolume improvement.
         """
-        ehvi = EHVI()
-        acqf = ehvi.build(
+        nehvi = NEHVI()
+        acqf = nehvi.build(
             model=fitted_mogp,
             X_baseline=X_baseline,
             Y=Y_baseline,
@@ -239,25 +285,25 @@ class TestEHVIDirectional:
 
         # Point in unexplored region with potential for improvement
         X = torch.tensor([[[0.4]]], dtype=torch.float64)
-        ehvi_value = acqf(X).item()
+        nehvi_value = acqf(X).item()
 
-        # Should have some positive EHVI (uncertainty enables improvement)
-        assert ehvi_value >= 0
+        # Should have some positive NEHVI (uncertainty enables improvement)
+        assert nehvi_value >= 0
 
-    @pytest.mark.skip(reason="EHVI.build not yet implemented")
-    def test_dominated_point_has_low_ehvi(
+    @pytest.mark.skip(reason="NEHVI.build not yet implemented")
+    def test_dominated_point_has_low_nehvi(
         self, fitted_mogp, X_baseline, Y_baseline, ref_point_max, maximize_both
     ):
-        """Test that a clearly dominated point has low/zero EHVI.
+        """Test that a clearly dominated point has low/zero NEHVI.
 
         A point with mean predictions well below the Pareto frontier
         should have very low expected improvement.
         """
-        ehvi = EHVI()
+        nehvi = NEHVI()
 
         # Use a Pareto frontier that dominates the test point
         Y_high = Y_baseline + 2.0  # Shift frontier to high values
-        acqf = ehvi.build(
+        acqf = nehvi.build(
             model=fitted_mogp,
             X_baseline=X_baseline,
             Y=Y_high,
@@ -267,28 +313,28 @@ class TestEHVIDirectional:
 
         # Point near training data (low uncertainty, mean well below frontier)
         X = torch.tensor([[[0.5]]], dtype=torch.float64)
-        ehvi_value = acqf(X).item()
+        nehvi_value = acqf(X).item()
 
-        # EHVI should be small since point is dominated
+        # NEHVI should be small since point is dominated
         # (may not be exactly zero due to uncertainty)
-        assert ehvi_value < 0.5
+        assert nehvi_value < 0.5
 
 
 # =============================================================================
-# EHVI Edge Cases
+# NEHVI Edge Cases
 # =============================================================================
 
 
-class TestEHVIEdgeCases:
-    """Edge case tests for EHVI."""
+class TestNEHVIEdgeCases:
+    """Edge case tests for NEHVI."""
 
-    @pytest.mark.skip(reason="EHVI.build not yet implemented")
+    @pytest.mark.skip(reason="NEHVI.build not yet implemented")
     def test_single_point_batch(
         self, fitted_mogp, X_baseline, Y_baseline, ref_point_max, maximize_both
     ):
-        """Test EHVI with single point (batch=1, q=1)."""
-        ehvi = EHVI()
-        acqf = ehvi.build(
+        """Test NEHVI with single point (batch=1, q=1)."""
+        nehvi = NEHVI()
+        acqf = nehvi.build(
             model=fitted_mogp,
             X_baseline=X_baseline,
             Y=Y_baseline,
@@ -301,13 +347,13 @@ class TestEHVIEdgeCases:
 
         assert result.shape == (1,)
 
-    @pytest.mark.skip(reason="EHVI.build not yet implemented")
+    @pytest.mark.skip(reason="NEHVI.build not yet implemented")
     def test_multiple_batch(
         self, fitted_mogp, X_baseline, Y_baseline, ref_point_max, maximize_both
     ):
-        """Test EHVI with multiple batches (batch > 1)."""
-        ehvi = EHVI()
-        acqf = ehvi.build(
+        """Test NEHVI with multiple batches (batch > 1)."""
+        nehvi = NEHVI()
+        acqf = nehvi.build(
             model=fitted_mogp,
             X_baseline=X_baseline,
             Y=Y_baseline,
@@ -321,22 +367,22 @@ class TestEHVIEdgeCases:
 
         assert result.shape == (3,)
 
-    @pytest.mark.skip(reason="EHVI.build not yet implemented")
+    @pytest.mark.skip(reason="NEHVI.build not yet implemented")
     def test_alpha_affects_computation(
         self, fitted_mogp, X_baseline, Y_baseline, ref_point_max, maximize_both
     ):
         """Test that alpha parameter affects the acquisition value."""
-        ehvi_exact = EHVI(alpha=0.0)
-        ehvi_approx = EHVI(alpha=0.5)
+        nehvi_exact = NEHVI(alpha=0.0)
+        nehvi_approx = NEHVI(alpha=0.5)
 
-        acqf_exact = ehvi_exact.build(
+        acqf_exact = nehvi_exact.build(
             model=fitted_mogp,
             X_baseline=X_baseline,
             Y=Y_baseline,
             ref_point=ref_point_max,
             maximize=maximize_both,
         )
-        acqf_approx = ehvi_approx.build(
+        acqf_approx = nehvi_approx.build(
             model=fitted_mogp,
             X_baseline=X_baseline,
             Y=Y_baseline,
@@ -353,69 +399,37 @@ class TestEHVIEdgeCases:
         assert np.isfinite(value_exact)
         assert np.isfinite(value_approx)
 
-    @pytest.mark.skip(reason="EHVI.build not yet implemented")
-    def test_prune_baseline_option(
-        self, fitted_mogp, X_baseline, Y_baseline, ref_point_max, maximize_both
-    ):
-        """Test that prune_baseline option doesn't cause errors."""
-        ehvi_prune = EHVI(prune_baseline=True)
-        ehvi_no_prune = EHVI(prune_baseline=False)
-
-        acqf_prune = ehvi_prune.build(
-            model=fitted_mogp,
-            X_baseline=X_baseline,
-            Y=Y_baseline,
-            ref_point=ref_point_max,
-            maximize=maximize_both,
-        )
-        acqf_no_prune = ehvi_no_prune.build(
-            model=fitted_mogp,
-            X_baseline=X_baseline,
-            Y=Y_baseline,
-            ref_point=ref_point_max,
-            maximize=maximize_both,
-        )
-
-        X = torch.tensor([[[0.4]]], dtype=torch.float64)
-
-        # Both should produce valid results
-        result_prune = acqf_prune(X)
-        result_no_prune = acqf_no_prune(X)
-
-        assert torch.isfinite(result_prune).all()
-        assert torch.isfinite(result_no_prune).all()
-
 
 # =============================================================================
-# EHVI Reference Point Tests
+# NEHVI Reference Point Tests
 # =============================================================================
 
 
-class TestEHVIReferencePoint:
-    """Tests for reference point handling in EHVI."""
+class TestNEHVIReferencePoint:
+    """Tests for reference point handling in NEHVI."""
 
-    @pytest.mark.skip(reason="EHVI.build not yet implemented")
+    @pytest.mark.skip(reason="NEHVI.build not yet implemented")
     def test_different_ref_points_different_values(
         self, fitted_mogp, X_baseline, Y_baseline, maximize_both
     ):
-        """Test that different reference points produce different EHVI values.
+        """Test that different reference points produce different NEHVI values.
 
         The reference point defines the hypervolume region, so different
         reference points should generally produce different acquisition values.
         """
-        ehvi = EHVI()
+        nehvi = NEHVI()
 
         ref_point_low = [0.0, 0.0]
         ref_point_high = [-1.0, -1.0]  # Further from frontier
 
-        acqf_low = ehvi.build(
+        acqf_low = nehvi.build(
             model=fitted_mogp,
             X_baseline=X_baseline,
             Y=Y_baseline,
             ref_point=ref_point_low,
             maximize=maximize_both,
         )
-        acqf_high = ehvi.build(
+        acqf_high = nehvi.build(
             model=fitted_mogp,
             X_baseline=X_baseline,
             Y=Y_baseline,
@@ -432,17 +446,17 @@ class TestEHVIReferencePoint:
         assert np.isfinite(value_low)
         assert np.isfinite(value_high)
 
-    @pytest.mark.skip(reason="EHVI.build not yet implemented")
+    @pytest.mark.skip(reason="NEHVI.build not yet implemented")
     def test_ref_point_dominated_by_frontier(
         self, fitted_mogp, X_baseline, Y_baseline, maximize_both
     ):
-        """Test EHVI with reference point properly dominated by Pareto frontier."""
-        ehvi = EHVI()
+        """Test NEHVI with reference point properly dominated by Pareto frontier."""
+        nehvi = NEHVI()
 
         # Reference point well below all observations
         ref_point = [0.5, 0.5]  # Below the Y values
 
-        acqf = ehvi.build(
+        acqf = nehvi.build(
             model=fitted_mogp,
             X_baseline=X_baseline,
             Y=Y_baseline,
@@ -459,12 +473,12 @@ class TestEHVIReferencePoint:
 
 
 # =============================================================================
-# EHVI Multi-dimensional Tests
+# NEHVI Multi-dimensional Tests
 # =============================================================================
 
 
-class TestEHVIMultidimensional:
-    """Tests for EHVI with multi-dimensional inputs."""
+class TestNEHVIMultidimensional:
+    """Tests for NEHVI with multi-dimensional inputs."""
 
     @pytest.fixture
     def fitted_mogp_2d(self):
@@ -526,13 +540,13 @@ class TestEHVIMultidimensional:
         y2 = torch.tensor([0.9, 0.8, 0.7, 0.6, 0.5], dtype=torch.float64)
         return torch.stack([y1, y2], dim=-1)
 
-    @pytest.mark.skip(reason="EHVI.build not yet implemented")
+    @pytest.mark.skip(reason="NEHVI.build not yet implemented")
     def test_2d_input_returns_correct_shape(
         self, fitted_mogp_2d, X_baseline_2d, Y_baseline_2d, ref_point_max, maximize_both
     ):
-        """Test EHVI with 2D inputs returns correct output shape."""
-        ehvi = EHVI()
-        acqf = ehvi.build(
+        """Test NEHVI with 2D inputs returns correct output shape."""
+        nehvi = NEHVI()
+        acqf = nehvi.build(
             model=fitted_mogp_2d,
             X_baseline=X_baseline_2d,
             Y=Y_baseline_2d,
@@ -547,13 +561,13 @@ class TestEHVIMultidimensional:
         assert result.shape == (1,)
         assert torch.isfinite(result).all()
 
-    @pytest.mark.skip(reason="EHVI.build not yet implemented")
+    @pytest.mark.skip(reason="NEHVI.build not yet implemented")
     def test_2d_input_multiple_candidates(
         self, fitted_mogp_2d, X_baseline_2d, Y_baseline_2d, ref_point_max, maximize_both
     ):
-        """Test EHVI with multiple 2D candidates."""
-        ehvi = EHVI()
-        acqf = ehvi.build(
+        """Test NEHVI with multiple 2D candidates."""
+        nehvi = NEHVI()
+        acqf = nehvi.build(
             model=fitted_mogp_2d,
             X_baseline=X_baseline_2d,
             Y=Y_baseline_2d,
@@ -573,12 +587,12 @@ class TestEHVIMultidimensional:
 
 
 # =============================================================================
-# EHVI Three Objectives Tests
+# NEHVI Three Objectives Tests
 # =============================================================================
 
 
-class TestEHVIThreeObjectives:
-    """Tests for EHVI with three objectives."""
+class TestNEHVIThreeObjectives:
+    """Tests for NEHVI with three objectives."""
 
     @pytest.fixture
     def fitted_mogp_3obj(self):
@@ -626,14 +640,14 @@ class TestEHVIThreeObjectives:
         y3 = (-((X - 0.8) ** 2) + 1).squeeze(-1)
         return torch.stack([y1, y2, y3], dim=-1)
 
-    @pytest.mark.skip(reason="EHVI.build not yet implemented")
+    @pytest.mark.skip(reason="NEHVI.build not yet implemented")
     def test_three_objectives(self, fitted_mogp_3obj, X_baseline, Y_baseline_3obj):
-        """Test EHVI with three objectives."""
-        ehvi = EHVI()
+        """Test NEHVI with three objectives."""
+        nehvi = NEHVI()
         ref_point = [0.0, 0.0, 0.0]
         maximize = [True, True, True]
 
-        acqf = ehvi.build(
+        acqf = nehvi.build(
             model=fitted_mogp_3obj,
             X_baseline=X_baseline,
             Y=Y_baseline_3obj,
@@ -650,38 +664,60 @@ class TestEHVIThreeObjectives:
 
 
 # =============================================================================
-# EHVI Minimization Tests (Objective Negation)
+# NEHVI Mixed Optimization Tests
 # =============================================================================
 
 
-class TestEHVIMinimization:
-    """Tests for EHVI with minimization objectives (negated)."""
+class TestNEHVIMixedOptimization:
+    """Tests for NEHVI with mixed maximize/minimize objectives."""
 
-    @pytest.mark.skip(reason="EHVI.build not yet implemented")
-    def test_negated_objective_for_minimization(
-        self, fitted_mogp, X_baseline, Y_baseline
-    ):
-        """Test EHVI with negated objective for minimization.
+    @pytest.mark.skip(reason="NEHVI.build not yet implemented")
+    def test_mixed_max_min_objectives(self, fitted_mogp, X_baseline, Y_baseline):
+        """Test NEHVI with one maximize and one minimize objective.
 
-        When minimize=False for an objective, user must negate Y column
-        before calling build(). This test verifies the pattern works.
+        Pass original Y values; negation for minimize objectives is
+        handled internally by _prepare_for_maximization.
         """
-        ehvi = EHVI()
+        nehvi = NEHVI()
 
-        # Negate second objective (simulating minimization)
-        Y_with_negation = Y_baseline.clone()
-        Y_with_negation[:, 1] = -Y_with_negation[:, 1]
+        # Maximize objective 0, minimize objective 1
+        # Reference point should be dominated in original objective space:
+        # - For maximize: ref < worst observed
+        # - For minimize: ref > worst observed
+        ref_point = [0.0, 2.0]
+        maximize = [True, False]
 
-        # Adjust reference point for negated objective
-        ref_point = [0.0, -2.0]  # Second ref is negative since we negated
-
-        # After negation, both are "maximize" from BoTorch's perspective
-        maximize = [True, True]
-
-        acqf = ehvi.build(
+        acqf = nehvi.build(
             model=fitted_mogp,
             X_baseline=X_baseline,
-            Y=Y_with_negation,
+            Y=Y_baseline,
+            ref_point=ref_point,
+            maximize=maximize,
+        )
+
+        X = torch.tensor([[[0.4]]], dtype=torch.float64)
+        result = acqf(X)
+
+        assert torch.isfinite(result).all()
+        assert result.item() >= 0
+
+    @pytest.mark.skip(reason="NEHVI.build not yet implemented")
+    def test_all_minimize_objectives(self, fitted_mogp, X_baseline, Y_baseline):
+        """Test NEHVI with all minimize objectives.
+
+        Pass original Y values; negation is handled internally.
+        """
+        nehvi = NEHVI()
+
+        # Minimize both objectives
+        # Reference point: values worse (higher) than worst observed
+        ref_point = [2.0, 2.0]
+        maximize = [False, False]
+
+        acqf = nehvi.build(
+            model=fitted_mogp,
+            X_baseline=X_baseline,
+            Y=Y_baseline,
             ref_point=ref_point,
             maximize=maximize,
         )
@@ -715,9 +751,9 @@ class TestMultiObjectiveAcquisitionBase:
         with pytest.raises(TypeError, match="(?i)abstract|instantiate"):
             IncompleteAcquisition()
 
-    def test_ehvi_is_subclass(self):
-        """Test that EHVI is a proper subclass of MultiObjectiveAcquisition."""
-        assert issubclass(EHVI, MultiObjectiveAcquisition)
+    def test_nehvi_is_subclass(self):
+        """Test that NEHVI is a proper subclass of MultiObjectiveAcquisition."""
+        assert issubclass(NEHVI, MultiObjectiveAcquisition)
 
     def test_parego_is_subclass(self):
         """Test that ParEGO is a proper subclass of MultiObjectiveAcquisition."""

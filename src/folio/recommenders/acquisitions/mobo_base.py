@@ -77,6 +77,71 @@ class MultiObjectiveAcquisition(ABC):
     Improvement for Parallel Multi-Objective Bayesian Optimization.
     """
 
+    def _prepare_for_maximization(
+        self,
+        Y: torch.Tensor,
+        ref_point: list[float],
+        maximize: list[bool],
+    ) -> tuple[torch.Tensor, list[float]]:
+        """Convert mixed max/min objectives to all-maximization for BoTorch.
+
+        BoTorch multi-objective acquisition functions assume maximization of all
+        objectives. This helper negates columns of Y and corresponding elements
+        of ref_point for any objective where maximize[i] is False, converting
+        a mixed maximization/minimization problem to pure maximization.
+
+        Parameters
+        ----------
+        Y : torch.Tensor
+            Observed objective values, shape (n_samples, n_objectives).
+            Original values as provided by the caller.
+        ref_point : list[float]
+            Reference point for hypervolume calculation, length n_objectives.
+            Original values as provided by the caller.
+        maximize : list[bool]
+            Optimization direction for each objective, length n_objectives.
+            True = maximize, False = minimize.
+
+        Returns
+        -------
+        Y_max : torch.Tensor
+            Copy of Y with columns negated where maximize[i] is False.
+        ref_point_max : list[float]
+            Copy of ref_point with elements negated where maximize[i] is False.
+
+        Examples
+        --------
+        All maximization (no changes):
+
+        >>> acq = SomeMultiObjectiveAcquisition()
+        >>> Y = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+        >>> ref_point = [0.0, 0.0]
+        >>> maximize = [True, True]
+        >>> Y_max, ref_max = acq._prepare_for_maximization(Y, ref_point, maximize)
+        >>> Y_max  # unchanged
+        tensor([[1., 2.], [3., 4.]])
+        >>> ref_max  # unchanged
+        [0.0, 0.0]
+
+        Mixed optimization (minimize objective 1):
+
+        >>> maximize = [False, True]
+        >>> Y_max, ref_max = acq._prepare_for_maximization(Y, ref_point, maximize)
+        >>> Y_max  # first column negated
+        tensor([[-1., 2.], [-3., 4.]])
+        >>> ref_max  # first element negated
+        [-0.0, 0.0]
+        """
+        Y_max = Y.clone()
+        ref_point_max = list(ref_point)
+
+        for i, should_maximize in enumerate(maximize):
+            if not should_maximize:
+                Y_max[:, i] = -Y_max[:, i]
+                ref_point_max[i] = -ref_point_max[i]
+
+        return Y_max, ref_point_max
+
     @abstractmethod
     def build(
         self,

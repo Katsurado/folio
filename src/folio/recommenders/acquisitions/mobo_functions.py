@@ -9,17 +9,17 @@ from botorch.models.model import Model
 from folio.recommenders.acquisitions.mobo_base import MultiObjectiveAcquisition
 
 
-class EHVI(MultiObjectiveAcquisition):
-    """Expected Hypervolume Improvement acquisition function builder.
+class NEHVI(MultiObjectiveAcquisition):
+    """Noisy Expected Hypervolume Improvement acquisition function builder.
 
-    EHVI measures the expected increase in the hypervolume dominated by the
-    Pareto frontier when adding a new candidate point. It naturally balances
-    exploration and exploitation across all objectives simultaneously, favoring
-    points that are likely to expand the Pareto frontier.
+    NEHVI measures the expected increase in the hypervolume dominated by the
+    Pareto frontier when adding a new candidate point, accounting for observation
+    noise. It naturally balances exploration and exploitation across all objectives
+    simultaneously, favoring points that are likely to expand the Pareto frontier.
 
-    This implementation wraps BoTorch's qNoisyExpectedHypervolumeImprovement
-    (qNEHVI), which handles noisy observations and supports batch acquisition
-    (q > 1 candidates per iteration).
+    This implementation wraps BoTorch's qNoisyExpectedHypervolumeImprovement,
+    which handles noisy observations and supports batch acquisition (q > 1
+    candidates per iteration).
 
     Parameters
     ----------
@@ -27,81 +27,49 @@ class EHVI(MultiObjectiveAcquisition):
         Hyperparameter controlling the approximation of the Pareto frontier
         for the box decomposition. A value of 0.0 gives the exact hypervolume;
         small positive values can improve numerical stability.
-    prune_baseline : bool, default=True
-        If True, prune dominated points from the baseline before computing
-        the acquisition value. This can improve computational efficiency
-        without affecting the result.
-    cache_root : bool, default=True
-        If True, cache the root decomposition of the Pareto frontier to
-        speed up repeated evaluations during optimization.
-
-    Attributes
-    ----------
-    alpha : float
-        The approximation parameter.
-    prune_baseline : bool
-        Whether to prune dominated baseline points.
-    cache_root : bool
-        Whether to cache root decomposition.
 
     Notes
     -----
-    **Objective Negation**: BoTorch always assumes maximization. For objectives
-    where `maximize[i]` is False (minimization), you must negate the corresponding
-    column in Y before passing to build(). The reference point should also be
-    adjusted accordingly (negate the reference value for minimized objectives).
+    **Objective Handling**: Pass original Y values and specify the maximize
+    direction for each objective. The builder internally handles negation for
+    objectives that should be minimized.
 
     **Reference Point Selection**: The reference point should be dominated by
     all points on the current Pareto frontier. A common heuristic is to use
     values slightly worse than the worst observed values for each objective.
     Poor reference point choices can lead to zero hypervolume improvement.
 
-    **Computational Cost**: EHVI scales poorly with the number of objectives
+    **Computational Cost**: NEHVI scales poorly with the number of objectives
     (exponentially in the worst case) due to the box decomposition of the
     Pareto frontier. For more than 3-4 objectives, consider using ParEGO
     or other scalarization-based methods.
 
     Examples
     --------
-    >>> ehvi = EHVI(alpha=0.0, prune_baseline=True)
-    >>> acqf = ehvi.build(
+    >>> nehvi = NEHVI(alpha=0.0)
+    >>> acqf = nehvi.build(
     ...     model=fitted_mogp,
     ...     X_baseline=X_observed,
-    ...     Y=Y_observed,  # Negate columns for objectives to minimize!
-    ...     ref_point=[0.0, 0.0],  # Adjust for negated objectives
-    ...     maximize=[True, True],  # After negation, all are "maximize"
+    ...     Y=Y_observed,  # Original values, negation handled internally
+    ...     ref_point=[0.0, 0.0],
+    ...     maximize=[True, False],  # Maximize obj 0, minimize obj 1
     ... )
     >>> candidates, values = optimize_acqf(acqf, bounds=bounds, q=1, ...)
 
-    Reference: Emmerich, Giannakoglou, Naujoks (2006), Single- and Multiobjective
-    Evolutionary Optimization Assisted by Gaussian Random Field Metamodels.
-
-    See Also: Daulton, Balandat, Bakshy (2021), Parallel Bayesian Optimization
+    Reference: Daulton, Balandat, Bakshy (2021), Parallel Bayesian Optimization
     of Multiple Noisy Objectives with Expected Hypervolume Improvement.
     """
 
-    def __init__(
-        self,
-        alpha: float = 0.0,
-        prune_baseline: bool = True,
-        cache_root: bool = True,
-    ):
-        """Initialize Expected Hypervolume Improvement builder.
+    def __init__(self, alpha: float = 0.0):
+        """Initialize Noisy Expected Hypervolume Improvement builder.
 
         Parameters
         ----------
         alpha : float, default=0.0
             Approximation parameter for box decomposition. Use 0.0 for exact
             hypervolume computation; small positive values may improve stability.
-        prune_baseline : bool, default=True
-            If True, remove dominated points from the baseline Pareto frontier
-            before computing acquisition values.
-        cache_root : bool, default=True
-            If True, cache the root decomposition for faster repeated evaluations.
         """
         self.alpha = alpha
-        self.prune_baseline = prune_baseline
-        self.cache_root = cache_root
 
     def build(
         self,
@@ -113,7 +81,7 @@ class EHVI(MultiObjectiveAcquisition):
     ) -> AcquisitionFunction:
         """Build a BoTorch qNoisyExpectedHypervolumeImprovement acquisition function.
 
-        Constructs an EHVI acquisition function using the provided multi-output
+        Constructs an NEHVI acquisition function using the provided multi-output
         model and observed data. The acquisition function can then be optimized
         using BoTorch's optimize_acqf to find the next candidate(s).
 
@@ -128,47 +96,21 @@ class EHVI(MultiObjectiveAcquisition):
             compute the current Pareto frontier for hypervolume calculation.
         Y : torch.Tensor
             Observed objective values, shape (n_samples, n_objectives).
-            **Important**: For objectives where maximize[i] is False, you must
-            negate the corresponding column BEFORE calling this method, since
-            BoTorch always maximizes. Example: if minimizing objective 1,
-            pass -Y[:, 1] instead of Y[:, 1].
+            Pass original values; negation for minimization objectives is
+            handled internally based on the maximize parameter.
         ref_point : list[float]
             Reference point for hypervolume calculation, length n_objectives.
-            Must be dominated by all Pareto-optimal points. For negated
-            (minimization) objectives, negate the reference value as well.
+            Must be dominated by all Pareto-optimal points. Pass original
+            reference values; negation is handled internally.
         maximize : list[bool]
             Optimization direction for each objective, length n_objectives.
-            After negating Y columns for minimization objectives, this should
-            effectively be all True (since BoTorch maximizes). This parameter
-            is included for interface consistency and validation.
+            True = maximize that objective, False = minimize.
 
         Returns
         -------
         AcquisitionFunction
             A BoTorch qNoisyExpectedHypervolumeImprovement instance configured
             with the provided model, baseline data, and reference point.
-
-        Notes
-        -----
-        Implementation should:
-
-        1. Create a NondominatedPartitioning from Y and ref_point
-        2. Instantiate qNoisyExpectedHypervolumeImprovement with:
-           - model=model
-           - ref_point=ref_point (as tensor)
-           - X_baseline=X_baseline
-           - prune_baseline=self.prune_baseline
-           - alpha=self.alpha
-           - cache_root=self.cache_root
-        3. Return the acquisition function
-
-        Example imports needed:
-            from botorch.acquisition.multi_objective.monte_carlo import (
-                qNoisyExpectedHypervolumeImprovement,
-            )
-            from botorch.utils.multi_objective.box_decompositions.non_dominated import (
-                NondominatedPartitioning,
-            )
         """
         ...
 
@@ -182,7 +124,7 @@ class ParEGO(MultiObjectiveAcquisition):
     a standard single-objective acquisition function (typically Expected Improvement).
 
     This approach is simpler and more scalable than hypervolume-based methods,
-    making it suitable for problems with many objectives (4+) where EHVI becomes
+    making it suitable for problems with many objectives (4+) where NEHVI becomes
     computationally expensive.
 
     Parameters
@@ -203,25 +145,18 @@ class ParEGO(MultiObjectiveAcquisition):
         trade-off between the max term and sum term. Ignored for linear
         scalarization. Small positive values (0.01-0.1) are typical.
 
-    Attributes
-    ----------
-    scalarization : str
-        The scalarization method.
-    rho : float
-        The augmentation parameter.
-
     Notes
     -----
-    **Objective Negation**: Like EHVI, BoTorch assumes maximization. For
-    objectives where `maximize[i]` is False, negate the corresponding column
-    in Y before calling build().
+    **Objective Handling**: Pass original Y values and specify the maximize
+    direction for each objective. The builder internally handles negation for
+    objectives that should be minimized.
 
     **Weight Sampling**: At each call to build(), new random weights are
     sampled from a Dirichlet distribution (ensuring they sum to 1). This
     randomization helps explore different trade-offs across the Pareto
     frontier over multiple iterations.
 
-    **Advantages over EHVI**:
+    **Advantages over NEHVI**:
     - Computational cost is independent of the number of objectives
     - Scales well to many-objective problems (4+ objectives)
     - Simpler implementation with fewer hyperparameters
@@ -237,9 +172,9 @@ class ParEGO(MultiObjectiveAcquisition):
     >>> acqf = parego.build(
     ...     model=fitted_mogp,
     ...     X_baseline=X_observed,
-    ...     Y=Y_observed,  # Negate columns for objectives to minimize!
-    ...     ref_point=[0.0, 0.0],  # Used for utopia point estimation
-    ...     maximize=[True, True],
+    ...     Y=Y_observed,  # Original values, negation handled internally
+    ...     ref_point=[0.0, 0.0],
+    ...     maximize=[True, False],  # Maximize obj 0, minimize obj 1
     ... )
     >>> candidates, values = optimize_acqf(acqf, bounds=bounds, q=1, ...)
 
@@ -290,11 +225,8 @@ class ParEGO(MultiObjectiveAcquisition):
     ) -> AcquisitionFunction:
         """Build a ParEGO acquisition function with random scalarization weights.
 
-        Constructs a scalarized single-objective acquisition function by:
-        1. Sampling random weights from a Dirichlet distribution
-        2. Creating a scalarization transform (Chebyshev or linear)
-        3. Wrapping the multi-output model with the scalarization
-        4. Building a standard single-objective acquisition (e.g., EI)
+        Constructs a scalarized single-objective acquisition function by sampling
+        random weights and combining the objectives into a single value.
 
         Parameters
         ----------
@@ -306,15 +238,14 @@ class ParEGO(MultiObjectiveAcquisition):
             estimate the utopia point for Chebyshev scalarization.
         Y : torch.Tensor
             Observed objective values, shape (n_samples, n_objectives).
-            **Important**: For objectives where maximize[i] is False, negate
-            the corresponding column BEFORE calling this method.
+            Pass original values; negation for minimization objectives is
+            handled internally based on the maximize parameter.
         ref_point : list[float]
             Reference point, length n_objectives. For ParEGO, this may be
             used to help estimate the utopia/nadir points for normalization.
         maximize : list[bool]
             Optimization direction for each objective, length n_objectives.
-            After negating Y columns for minimization objectives, this should
-            effectively be all True.
+            True = maximize that objective, False = minimize.
 
         Returns
         -------
@@ -322,24 +253,5 @@ class ParEGO(MultiObjectiveAcquisition):
             A BoTorch acquisition function that evaluates the scalarized
             objective. Can be used with optimize_acqf like any single-objective
             acquisition function.
-
-        Notes
-        -----
-        Implementation should:
-
-        1. Sample weights from Dirichlet(1, 1, ..., 1) distribution
-        2. Compute utopia point (best value per objective from Y)
-        3. For Chebyshev: use get_chebyshev_scalarization from BoTorch
-           For linear: create weighted sum scalarization
-        4. Create a posterior transform or model wrapper that applies scalarization
-        5. Build ExpectedImprovement (or similar) on the scalarized model
-        6. Return the acquisition function
-
-        Example imports needed:
-            from botorch.acquisition.objective import GenericMCObjective
-            from botorch.utils.multi_objective.scalarization import (
-                get_chebyshev_scalarization,
-            )
-            from torch.distributions import Dirichlet
         """
         ...
