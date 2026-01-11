@@ -372,7 +372,7 @@ class TestSingleTaskGPSurrogateBehavior:
         gp = SingleTaskGPSurrogate().fit(X, y)
         mean, _ = gp.predict(X)
         # Mean predictions should be close to training targets
-        assert np.allclose(mean, y, atol=0.3)
+        assert np.allclose(mean, y.flatten(), atol=0.3)
 
     def test_interpolation_is_smooth(self, sine_data):
         """GP should provide smooth interpolation."""
