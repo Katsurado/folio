@@ -9,10 +9,13 @@ from botorch.optim.optimize import optimize_acqf
 
 from folio.recommenders.acquisitions import (
     ExpectedImprovement,
+    NEHVI,
+    ParEGO,
     UpperConfidenceBound,
 )
 from folio.recommenders.base import Recommender
 from folio.surrogates import MultiTaskGPSurrogate, SingleTaskGPSurrogate
+from folio.surrogates.base import Surrogate
 
 if TYPE_CHECKING:
     from folio.core.project import Project
@@ -62,7 +65,7 @@ class BayesianRecommender(Recommender):
     ...         InputSpec("pressure", "continuous", bounds=(1.0, 10.0)),
     ...     ],
     ...     outputs=[OutputSpec("yield")],
-    ...     target_config=TargetConfig("yield", mode="maximize"),
+    ...     target_configs=[TargetConfig(objective="yield", objective_mode="maximize")],
     ...     recommender_config=RecommenderConfig(
     ...         type="bayesian",
     ...         surrogate="gp",
@@ -287,3 +290,123 @@ class BayesianRecommender(Recommender):
             raise ValueError(f"Unknown acquisition function: {acq_type}")
 
         return builder.build(self._surrogate.model, best_f, maximize)
+
+    def _build_surrogate_for_project(self) -> Surrogate:
+        """Build the appropriate surrogate model based on project configuration.
+
+        Dispatches to SingleTaskGPSurrogate for single-objective optimization
+        or MultiTaskGPSurrogate/ModelListGP for multi-objective optimization,
+        based on project.target_config and project.recommender_config.
+
+        Returns
+        -------
+        Surrogate
+            An unfitted surrogate model instance. For single-objective, returns
+            SingleTaskGPSurrogate. For multi-objective, returns MultiTaskGPSurrogate
+            or a BoTorch ModelListGP wrapper depending on recommender_config.surrogate.
+
+        Notes
+        -----
+        The surrogate type is determined by:
+        1. project.is_multi_objective() -> determines single vs multi-objective
+        2. recommender_config.surrogate -> "gp", "multitask_gp", or "model_list_gp"
+
+        For multi-objective:
+        - "multitask_gp": Uses ICM kernel to model correlations between objectives
+        - "model_list_gp": Independent GP per objective (no correlation modeling)
+
+        Examples
+        --------
+        >>> # Single-objective project
+        >>> surrogate = recommender._build_surrogate_for_project()
+        >>> isinstance(surrogate, SingleTaskGPSurrogate)  # True
+
+        >>> # Multi-objective project with multitask GP
+        >>> surrogate = recommender._build_surrogate_for_project()
+        >>> isinstance(surrogate, MultiTaskGPSurrogate)  # True
+        """
+        # TODO: Implement the following logic:
+        # 1. Get surrogate_type from self.project.recommender_config.surrogate
+        # 2. Get surrogate_kwargs from self.project.recommender_config.surrogate_kwargs
+        # 3. If self.project.is_multi_objective():
+        #    a. If surrogate_type == "multitask_gp":
+        #       - Return MultiTaskGPSurrogate(**surrogate_kwargs)
+        #    b. If surrogate_type == "model_list_gp":
+        #       - Return ModelListGPSurrogate(**surrogate_kwargs)  # May need wrapper
+        #    c. Else: raise ValueError for unknown surrogate type
+        # 4. Else (single-objective):
+        #    a. If surrogate_type == "gp":
+        #       - Return SingleTaskGPSurrogate(**surrogate_kwargs)
+        #    b. Else: raise ValueError for unknown surrogate type
+        raise NotImplementedError
+
+    def _build_acquisition_for_project(
+        self, X: np.ndarray, Y: np.ndarray
+    ) -> AcquisitionFunction:
+        """Build the appropriate acquisition function based on project configuration.
+
+        Dispatches to EI/UCB for single-objective or NEHVI/ParEGO for multi-objective
+        optimization, based on project.target_config and project.recommender_config.
+
+        Parameters
+        ----------
+        X : np.ndarray, shape (n_samples, n_features), dtype float64
+            Training inputs, used by some multi-objective acquisitions (e.g., NEHVI)
+            to compute the Pareto frontier.
+        Y : np.ndarray, shape (n_samples, n_targets), dtype float64
+            Training targets. For single-objective, shape is (n, 1). For
+            multi-objective, shape is (n, m) where m = number of objectives.
+
+        Returns
+        -------
+        AcquisitionFunction
+            A BoTorch-compatible acquisition function ready for optimize_acqf.
+            For single-objective: EI or UCB. For multi-objective: NEHVI or ParEGO.
+
+        Notes
+        -----
+        This method assumes _fit_surrogate has been called and self._surrogate
+        is a fitted model.
+
+        For single-objective:
+        - Computes best_f from Y (max or min depending on objective_mode)
+        - Builds EI or UCB using the existing _build_acquisition() method
+
+        For multi-objective:
+        - Extracts reference_point from project.reference_point
+        - Extracts maximize flags from each target_config.objective_mode
+        - Converts X, Y to torch tensors
+        - Builds NEHVI or ParEGO with model, X_baseline, Y, ref_point, maximize
+
+        Examples
+        --------
+        >>> # Single-objective
+        >>> acqf = recommender._build_acquisition_for_project(X, Y)
+        >>> isinstance(acqf, _EIAcquisition)  # True (if acquisition="ei")
+
+        >>> # Multi-objective
+        >>> acqf = recommender._build_acquisition_for_project(X, Y)
+        >>> isinstance(acqf, qLogNoisyExpectedHypervolumeImprovement)  # True
+        """
+        # TODO: Implement the following logic:
+        # 1. Get acq_type from self.project.recommender_config.mo_acquisition (for MO)
+        #    or self.project.recommender_config.acquisition (for SO)
+        # 2. Get acq_kwargs from self.project.recommender_config.acquisition_kwargs
+        #
+        # 3. If self.project.is_multi_objective():
+        #    a. Get reference_point from self.project.reference_point
+        #    b. Get maximize flags: [cfg.objective_mode == "maximize"
+        #       for cfg in self.project.target_configs]
+        #    c. Convert X, Y to torch.float64 tensors
+        #    d. If acq_type == "nehvi":
+        #       - builder = NEHVI(**acq_kwargs)
+        #       - Return builder.build(model, X_baseline, Y, ref_point, maximize)
+        #    e. If acq_type == "parego":
+        #       - builder = ParEGO(**acq_kwargs)
+        #       - Return builder.build(model, X_baseline, Y, ref_point, maximize)
+        #    f. Else: raise ValueError for unknown acquisition type
+        #
+        # 4. Else (single-objective):
+        #    a. Determine best_f and maximize from Y and objective_mode
+        #    b. Use existing _build_acquisition(best_f, maximize) method
+        raise NotImplementedError

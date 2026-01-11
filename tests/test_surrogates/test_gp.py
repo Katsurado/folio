@@ -15,15 +15,21 @@ from folio.surrogates import SingleTaskGPSurrogate
 
 @pytest.fixture
 def sine_data():
-    """Generate 5-point sine wave training data."""
+    """Generate 5-point sine wave training data.
+
+    Returns X with shape (5, 1) and y with shape (5, 1).
+    """
     X = np.array([[0.0], [0.25], [0.5], [0.75], [1.0]])
-    y = np.sin(2 * np.pi * X).ravel()
+    y = np.sin(2 * np.pi * X)
     return X, y
 
 
 @pytest.fixture
 def multidim_data():
-    """Generate 2D training data (5 points)."""
+    """Generate 2D training data (5 points).
+
+    Returns X with shape (5, 2) and y with shape (5, 1).
+    """
     X = np.array(
         [
             [0.0, 0.0],
@@ -33,7 +39,7 @@ def multidim_data():
             [0.5, 0.5],
         ]
     )
-    y = X[:, 0] + X[:, 1]
+    y = (X[:, 0] + X[:, 1]).reshape(-1, 1)
     return X, y
 
 
@@ -117,17 +123,24 @@ class TestSingleTaskGPSurrogateFit:
         with pytest.raises(ValueError, match="samples"):
             SingleTaskGPSurrogate().fit(X, y[:-1])
 
-    def test_fit_y_2d_raises(self):
-        """fit() raises ValueError if y is 2D."""
+    def test_fit_y_1d_raises(self):
+        """fit() raises ValueError if y is 1D."""
         X = np.array([[0.0], [0.5], [1.0]])
-        y = np.array([[0.0], [0.5], [1.0]])
-        with pytest.raises(ValueError, match="(?i)1d|1-d|dimension|ndim"):
+        y = np.array([0.0, 0.5, 1.0])
+        with pytest.raises(ValueError, match="(?i)2d|shape.*\\(n.*1\\)|\\(n, 1\\)"):
+            SingleTaskGPSurrogate().fit(X, y)
+
+    def test_fit_y_wrong_shape_raises(self):
+        """fit() raises ValueError if y has wrong second dimension."""
+        X = np.array([[0.0], [0.5], [1.0]])
+        y = np.array([[0.0, 0.1], [0.5, 0.6], [1.0, 1.1]])
+        with pytest.raises(ValueError, match="(?i)2d|shape.*\\(n.*1\\)|\\(n, 1\\)"):
             SingleTaskGPSurrogate().fit(X, y)
 
     def test_fit_single_sample(self):
         """fit() works with a single training point."""
         X = np.array([[0.5]])
-        y = np.array([1.0])
+        y = np.array([[1.0]])
         gp = SingleTaskGPSurrogate()
         gp.fit(X, y)
         assert gp.n_features == 1
@@ -183,7 +196,7 @@ class TestSingleTaskGPSurrogateFit:
         """Calling fit() again updates the model."""
         # Use more training points for robust fitting
         X = np.linspace(0, 1, 20).reshape(-1, 1)
-        y = np.sin(2 * np.pi * X).ravel()
+        y = np.sin(2 * np.pi * X)
 
         gp = SingleTaskGPSurrogate()
         gp.fit(X, y)
@@ -191,7 +204,7 @@ class TestSingleTaskGPSurrogateFit:
         mean1, _ = gp.predict(np.array([[0.25]]))
 
         X2 = np.array([[0.0], [0.5], [1.0]])
-        y2 = np.array([0.0, 0.0, 0.0])
+        y2 = np.array([[0.0], [0.0], [0.0]])
         gp.fit(X2, y2)
         mean2, _ = gp.predict(np.array([[0.25]]))
 
@@ -206,21 +219,21 @@ class TestSingleTaskGPSurrogateDtype:
     def test_fit_float32_x_raises(self):
         """fit() raises ValueError for float32 X."""
         X = np.array([[0.0], [0.5], [1.0]], dtype=np.float32)
-        y = np.array([0.0, 0.5, 1.0], dtype=np.float64)
+        y = np.array([[0.0], [0.5], [1.0]], dtype=np.float64)
         with pytest.raises(ValueError, match="float64"):
             SingleTaskGPSurrogate().fit(X, y)
 
     def test_fit_float32_y_raises(self):
         """fit() raises ValueError for float32 y."""
         X = np.array([[0.0], [0.5], [1.0]], dtype=np.float64)
-        y = np.array([0.0, 0.5, 1.0], dtype=np.float32)
+        y = np.array([[0.0], [0.5], [1.0]], dtype=np.float32)
         with pytest.raises(ValueError, match="float64"):
             SingleTaskGPSurrogate().fit(X, y)
 
     def test_predict_float32_x_raises(self):
         """predict() raises ValueError for float32 X."""
         X = np.array([[0.0], [0.5], [1.0]], dtype=np.float64)
-        y = np.array([0.0, 0.5, 1.0], dtype=np.float64)
+        y = np.array([[0.0], [0.5], [1.0]], dtype=np.float64)
         gp = SingleTaskGPSurrogate().fit(X, y)
         X_test = np.array([[0.25]], dtype=np.float32)
         with pytest.raises(ValueError, match="float64"):
@@ -229,7 +242,7 @@ class TestSingleTaskGPSurrogateDtype:
     def test_float64_passes(self):
         """fit() and predict() work with float64."""
         X = np.array([[0.0], [0.5], [1.0]], dtype=np.float64)
-        y = np.array([0.0, 0.5, 1.0], dtype=np.float64)
+        y = np.array([[0.0], [0.5], [1.0]], dtype=np.float64)
         gp = SingleTaskGPSurrogate().fit(X, y)
         X_test = np.array([[0.25]], dtype=np.float64)
         mean, std = gp.predict(X_test)
@@ -378,7 +391,7 @@ class TestSingleTaskGPSurrogateNormalization:
     def test_normalization_handles_different_scales(self):
         """Normalization should handle inputs with different scales."""
         X = np.array([[1.0, 1000.0], [2.0, 2000.0], [3.0, 3000.0]])
-        y = X[:, 0] + X[:, 1] / 1000
+        y = (X[:, 0] + X[:, 1] / 1000).reshape(-1, 1)
         gp = SingleTaskGPSurrogate(normalize_inputs=True).fit(X, y)
         X_test = np.array([[1.5, 1500.0], [2.5, 2500.0]])
         mean, std = gp.predict(X_test)
@@ -388,7 +401,7 @@ class TestSingleTaskGPSurrogateNormalization:
     def test_output_normalization_preserves_scale(self):
         """Output normalization should preserve original scale in predictions."""
         X = np.array([[0.0], [0.5], [1.0]])
-        y = np.array([100.0, 150.0, 200.0])  # Large scale
+        y = np.array([[100.0], [150.0], [200.0]])  # Large scale
         gp = SingleTaskGPSurrogate(normalize_outputs=True).fit(X, y)
         mean, _ = gp.predict(X)
         # Predictions should be on original scale
@@ -398,7 +411,7 @@ class TestSingleTaskGPSurrogateNormalization:
     def test_no_normalization_works(self):
         """GP works without any normalization."""
         X = np.array([[0.0], [0.5], [1.0]])
-        y = np.array([0.0, 0.5, 1.0])
+        y = np.array([[0.0], [0.5], [1.0]])
         gp = SingleTaskGPSurrogate(normalize_inputs=False, normalize_outputs=False).fit(
             X, y
         )
@@ -412,7 +425,7 @@ class TestSingleTaskGPSurrogateEdgeCases:
     def test_constant_target_values(self):
         """GP handles constant target values."""
         X = np.array([[0.0], [0.5], [1.0]])
-        y = np.array([1.0, 1.0, 1.0])
+        y = np.array([[1.0], [1.0], [1.0]])
         gp = SingleTaskGPSurrogate().fit(X, y)
         mean, std = gp.predict(np.array([[0.25]]))
         assert mean.shape == (1,)
@@ -423,7 +436,7 @@ class TestSingleTaskGPSurrogateEdgeCases:
         """GP handles many input features."""
         n_features = 10
         X = np.random.rand(20, n_features)
-        y = np.sum(X, axis=1)
+        y = np.sum(X, axis=1, keepdims=True)
         gp = SingleTaskGPSurrogate().fit(X, y)
         X_test = np.random.rand(5, n_features)
         mean, std = gp.predict(X_test)
@@ -433,7 +446,7 @@ class TestSingleTaskGPSurrogateEdgeCases:
     def test_many_training_points(self):
         """GP handles many training points."""
         X = np.linspace(0, 1, 50).reshape(-1, 1)
-        y = np.sin(2 * np.pi * X).ravel()
+        y = np.sin(2 * np.pi * X)
         gp = SingleTaskGPSurrogate().fit(X, y)
         mean, std = gp.predict(np.array([[0.25], [0.75]]))
         assert mean.shape == (2,)
@@ -441,7 +454,7 @@ class TestSingleTaskGPSurrogateEdgeCases:
     def test_negative_target_values(self):
         """GP handles negative target values."""
         X = np.array([[0.0], [0.5], [1.0]])
-        y = np.array([-10.0, -5.0, 0.0])
+        y = np.array([[-10.0], [-5.0], [0.0]])
         gp = SingleTaskGPSurrogate().fit(X, y)
         mean, _ = gp.predict(X)
         assert np.all(mean < 5)
@@ -449,7 +462,7 @@ class TestSingleTaskGPSurrogateEdgeCases:
     def test_large_target_values(self):
         """GP handles large target values."""
         X = np.array([[0.0], [0.5], [1.0]])
-        y = np.array([1e6, 2e6, 3e6])
+        y = np.array([[1e6], [2e6], [3e6]])
         gp = SingleTaskGPSurrogate().fit(X, y)
         mean, _ = gp.predict(X)
         assert np.all(mean > 0)
@@ -461,14 +474,14 @@ class TestSingleTaskGPSurrogate1DInput:
     def test_fit_1d_X(self):
         """fit() accepts 1D X array and treats as single feature."""
         X = np.array([0.0, 0.25, 0.5, 0.75, 1.0])
-        y = np.sin(2 * np.pi * X)
+        y = np.sin(2 * np.pi * X).reshape(-1, 1)
         gp = SingleTaskGPSurrogate().fit(X, y)
         assert gp.n_features == 1
 
     def test_predict_1d_X(self):
         """predict() accepts 1D X array."""
         X_train = np.array([0.0, 0.25, 0.5, 0.75, 1.0])
-        y_train = np.sin(2 * np.pi * X_train)
+        y_train = np.sin(2 * np.pi * X_train).reshape(-1, 1)
         gp = SingleTaskGPSurrogate().fit(X_train, y_train)
 
         X_test = np.array([0.125, 0.375])
@@ -480,7 +493,7 @@ class TestSingleTaskGPSurrogate1DInput:
         """1D and 2D X produce identical results."""
         X_1d = np.array([0.0, 0.25, 0.5, 0.75, 1.0])
         X_2d = X_1d.reshape(-1, 1)
-        y = np.sin(2 * np.pi * X_1d)
+        y = np.sin(2 * np.pi * X_1d).reshape(-1, 1)
 
         gp_1d = SingleTaskGPSurrogate().fit(X_1d, y)
         gp_2d = SingleTaskGPSurrogate().fit(X_2d, y)
@@ -501,7 +514,7 @@ class TestSingleTaskGPSurrogateCorrectness:
     def test_interpolates_linear_function(self):
         """GP accurately interpolates a linear function."""
         X = np.array([[0.0], [0.5], [1.0]])
-        y = np.array([0.0, 0.5, 1.0])
+        y = np.array([[0.0], [0.5], [1.0]])
         gp = SingleTaskGPSurrogate().fit(X, y)
 
         X_test = np.array([[0.25], [0.75]])
@@ -512,16 +525,16 @@ class TestSingleTaskGPSurrogateCorrectness:
     def test_interpolates_sine_function(self):
         """GP accurately interpolates a sine function at training points."""
         X = np.linspace(0, 1, 10).reshape(-1, 1)
-        y = np.sin(2 * np.pi * X).ravel()
+        y = np.sin(2 * np.pi * X)
         gp = SingleTaskGPSurrogate().fit(X, y)
 
         mean, _ = gp.predict(X)
-        np.testing.assert_allclose(mean, y, atol=0.2)
+        np.testing.assert_allclose(mean, y.ravel(), atol=0.2)
 
     def test_extrapolation_increases_uncertainty(self):
         """Uncertainty increases for extrapolation beyond training range."""
         X = np.array([[0.2], [0.4], [0.6], [0.8]])
-        y = np.array([0.2, 0.4, 0.6, 0.8])
+        y = np.array([[0.2], [0.4], [0.6], [0.8]])
         gp = SingleTaskGPSurrogate().fit(X, y)
 
         _, std_interp = gp.predict(np.array([[0.5]]))
@@ -532,7 +545,7 @@ class TestSingleTaskGPSurrogateCorrectness:
     def test_prediction_mean_within_bounds(self):
         """GP predictions stay reasonable near training data."""
         X = np.array([[0.0], [0.5], [1.0]])
-        y = np.array([0.0, 1.0, 0.0])
+        y = np.array([[0.0], [1.0], [0.0]])
         gp = SingleTaskGPSurrogate().fit(X, y)
 
         X_test = np.linspace(0, 1, 20).reshape(-1, 1)
@@ -546,8 +559,8 @@ class TestSingleTaskGPSurrogateCorrectness:
         """More training data reduces prediction uncertainty."""
         X_sparse = np.array([[0.0], [1.0]])
         X_dense = np.linspace(0, 1, 10).reshape(-1, 1)
-        y_sparse = np.array([0.0, 1.0])
-        y_dense = np.linspace(0, 1, 10)
+        y_sparse = np.array([[0.0], [1.0]])
+        y_dense = np.linspace(0, 1, 10).reshape(-1, 1)
 
         gp_sparse = SingleTaskGPSurrogate().fit(X_sparse, y_sparse)
         gp_dense = SingleTaskGPSurrogate().fit(X_dense, y_dense)
@@ -608,13 +621,13 @@ class TestSingleTaskGPSurrogateVsReference:
     def test_matches_reference_simple_linear(self):
         """Output matches BoTorch on simple linear data."""
         X = np.array([[0.0], [0.5], [1.0]])
-        y = np.array([0.0, 0.5, 1.0])
+        y = np.array([[0.0], [0.5], [1.0]])
         X_test = np.array([[0.25], [0.75]])
 
         gp = SingleTaskGPSurrogate().fit(X, y)
         mean_ours, std_ours = gp.predict(X_test)
 
-        ref_model = _fit_reference_botorch_gp(X, y)
+        ref_model = _fit_reference_botorch_gp(X, y.ravel())
         mean_ref, std_ref = _predict_reference_botorch_gp(ref_model, X_test)
 
         np.testing.assert_allclose(mean_ours, mean_ref, rtol=0.1)
@@ -623,13 +636,13 @@ class TestSingleTaskGPSurrogateVsReference:
     def test_matches_reference_sine(self):
         """Output matches BoTorch on sine wave data."""
         X = np.linspace(0, 1, 10).reshape(-1, 1)
-        y = np.sin(2 * np.pi * X).ravel()
+        y = np.sin(2 * np.pi * X)
         X_test = np.array([[0.15], [0.35], [0.55], [0.85]])
 
         gp = SingleTaskGPSurrogate().fit(X, y)
         mean_ours, std_ours = gp.predict(X_test)
 
-        ref_model = _fit_reference_botorch_gp(X, y)
+        ref_model = _fit_reference_botorch_gp(X, y.ravel())
         mean_ref, std_ref = _predict_reference_botorch_gp(ref_model, X_test)
 
         np.testing.assert_allclose(mean_ours, mean_ref, rtol=0.1)
@@ -646,13 +659,13 @@ class TestSingleTaskGPSurrogateVsReference:
                 [0.5, 0.5],
             ]
         )
-        y = X[:, 0] + X[:, 1]
+        y = (X[:, 0] + X[:, 1]).reshape(-1, 1)
         X_test = np.array([[0.25, 0.25], [0.75, 0.75]])
 
         gp = SingleTaskGPSurrogate().fit(X, y)
         mean_ours, std_ours = gp.predict(X_test)
 
-        ref_model = _fit_reference_botorch_gp(X, y)
+        ref_model = _fit_reference_botorch_gp(X, y.ravel())
         mean_ref, std_ref = _predict_reference_botorch_gp(ref_model, X_test)
 
         np.testing.assert_allclose(mean_ours, mean_ref, rtol=0.1)
@@ -661,7 +674,7 @@ class TestSingleTaskGPSurrogateVsReference:
     def test_matches_reference_no_normalization(self):
         """Output matches BoTorch without normalization."""
         X = np.array([[0.0], [0.5], [1.0]])
-        y = np.array([0.0, 0.5, 1.0])
+        y = np.array([[0.0], [0.5], [1.0]])
         X_test = np.array([[0.25], [0.75]])
 
         gp = SingleTaskGPSurrogate(normalize_inputs=False, normalize_outputs=False).fit(
@@ -670,7 +683,7 @@ class TestSingleTaskGPSurrogateVsReference:
         mean_ours, std_ours = gp.predict(X_test)
 
         ref_model = _fit_reference_botorch_gp(
-            X, y, normalize_inputs=False, normalize_outputs=False
+            X, y.ravel(), normalize_inputs=False, normalize_outputs=False
         )
         mean_ref, std_ref = _predict_reference_botorch_gp(ref_model, X_test)
 
@@ -680,12 +693,12 @@ class TestSingleTaskGPSurrogateVsReference:
     def test_matches_reference_at_training_points(self):
         """Output matches BoTorch when predicting at training points."""
         X = np.array([[0.0], [0.25], [0.5], [0.75], [1.0]])
-        y = np.sin(2 * np.pi * X).ravel()
+        y = np.sin(2 * np.pi * X)
 
         gp = SingleTaskGPSurrogate().fit(X, y)
         mean_ours, std_ours = gp.predict(X)
 
-        ref_model = _fit_reference_botorch_gp(X, y)
+        ref_model = _fit_reference_botorch_gp(X, y.ravel())
         mean_ref, std_ref = _predict_reference_botorch_gp(ref_model, X)
 
         np.testing.assert_allclose(mean_ours, mean_ref, rtol=0.1)
@@ -702,13 +715,13 @@ class TestSingleTaskGPSurrogateVsReferenceEdgeCases:
         covariance matrix instability with n=1. This is expected behavior.
         """
         X = np.array([[0.5]])
-        y = np.array([1.0])
+        y = np.array([[1.0]])
         X_test = np.array([[0.0], [0.25], [0.75], [1.0]])
 
         gp = SingleTaskGPSurrogate().fit(X, y)
         mean_ours, std_ours = gp.predict(X_test)
 
-        ref_model = _fit_reference_botorch_gp(X, y)
+        ref_model = _fit_reference_botorch_gp(X, y.ravel())
         mean_ref, std_ref = _predict_reference_botorch_gp(ref_model, X_test)
 
         np.testing.assert_allclose(mean_ours, mean_ref, rtol=0.1)
@@ -717,13 +730,13 @@ class TestSingleTaskGPSurrogateVsReferenceEdgeCases:
     def test_matches_reference_constant_y(self):
         """Output matches BoTorch with constant target values."""
         X = np.array([[0.0], [0.5], [1.0]])
-        y = np.array([1.0, 1.0, 1.0])
+        y = np.array([[1.0], [1.0], [1.0]])
         X_test = np.array([[0.25], [0.75]])
 
         gp = SingleTaskGPSurrogate().fit(X, y)
         mean_ours, std_ours = gp.predict(X_test)
 
-        ref_model = _fit_reference_botorch_gp(X, y)
+        ref_model = _fit_reference_botorch_gp(X, y.ravel())
         mean_ref, std_ref = _predict_reference_botorch_gp(ref_model, X_test)
 
         np.testing.assert_allclose(mean_ours, mean_ref, rtol=0.1)
@@ -732,13 +745,13 @@ class TestSingleTaskGPSurrogateVsReferenceEdgeCases:
     def test_matches_reference_large_y_values(self):
         """Output matches BoTorch with large target values."""
         X = np.array([[0.0], [0.5], [1.0]])
-        y = np.array([1e6, 2e6, 3e6])
+        y = np.array([[1e6], [2e6], [3e6]])
         X_test = np.array([[0.25], [0.75]])
 
         gp = SingleTaskGPSurrogate().fit(X, y)
         mean_ours, std_ours = gp.predict(X_test)
 
-        ref_model = _fit_reference_botorch_gp(X, y)
+        ref_model = _fit_reference_botorch_gp(X, y.ravel())
         mean_ref, std_ref = _predict_reference_botorch_gp(ref_model, X_test)
 
         np.testing.assert_allclose(mean_ours, mean_ref, rtol=0.1)
@@ -747,13 +760,13 @@ class TestSingleTaskGPSurrogateVsReferenceEdgeCases:
     def test_matches_reference_negative_y_values(self):
         """Output matches BoTorch with negative target values."""
         X = np.array([[0.0], [0.5], [1.0]])
-        y = np.array([-10.0, -5.0, 0.0])
+        y = np.array([[-10.0], [-5.0], [0.0]])
         X_test = np.array([[0.25], [0.75]])
 
         gp = SingleTaskGPSurrogate().fit(X, y)
         mean_ours, std_ours = gp.predict(X_test)
 
-        ref_model = _fit_reference_botorch_gp(X, y)
+        ref_model = _fit_reference_botorch_gp(X, y.ravel())
         mean_ref, std_ref = _predict_reference_botorch_gp(ref_model, X_test)
 
         np.testing.assert_allclose(mean_ours, mean_ref, rtol=0.1)
@@ -762,13 +775,13 @@ class TestSingleTaskGPSurrogateVsReferenceEdgeCases:
     def test_matches_reference_different_scales(self):
         """Output matches BoTorch with inputs at different scales."""
         X = np.array([[1.0, 1000.0], [2.0, 2000.0], [3.0, 3000.0]])
-        y = X[:, 0] + X[:, 1] / 1000
+        y = (X[:, 0] + X[:, 1] / 1000).reshape(-1, 1)
         X_test = np.array([[1.5, 1500.0], [2.5, 2500.0]])
 
         gp = SingleTaskGPSurrogate().fit(X, y)
         mean_ours, std_ours = gp.predict(X_test)
 
-        ref_model = _fit_reference_botorch_gp(X, y)
+        ref_model = _fit_reference_botorch_gp(X, y.ravel())
         mean_ref, std_ref = _predict_reference_botorch_gp(ref_model, X_test)
 
         np.testing.assert_allclose(mean_ours, mean_ref, rtol=0.1)
@@ -777,13 +790,13 @@ class TestSingleTaskGPSurrogateVsReferenceEdgeCases:
     def test_matches_reference_extrapolation(self):
         """Output matches BoTorch when extrapolating beyond training range."""
         X = np.array([[0.2], [0.4], [0.6], [0.8]])
-        y = np.array([0.2, 0.4, 0.6, 0.8])
+        y = np.array([[0.2], [0.4], [0.6], [0.8]])
         X_test = np.array([[-0.5], [1.5], [2.0]])
 
         gp = SingleTaskGPSurrogate().fit(X, y)
         mean_ours, std_ours = gp.predict(X_test)
 
-        ref_model = _fit_reference_botorch_gp(X, y)
+        ref_model = _fit_reference_botorch_gp(X, y.ravel())
         mean_ref, std_ref = _predict_reference_botorch_gp(ref_model, X_test)
 
         np.testing.assert_allclose(mean_ours, mean_ref, rtol=0.1)
@@ -794,13 +807,13 @@ class TestSingleTaskGPSurrogateVsReferenceEdgeCases:
         np.random.seed(42)
         n_features = 10
         X = np.random.rand(20, n_features)
-        y = np.sum(X, axis=1)
+        y = np.sum(X, axis=1, keepdims=True)
         X_test = np.random.rand(5, n_features)
 
         gp = SingleTaskGPSurrogate().fit(X, y)
         mean_ours, std_ours = gp.predict(X_test)
 
-        ref_model = _fit_reference_botorch_gp(X, y)
+        ref_model = _fit_reference_botorch_gp(X, y.ravel())
         mean_ref, std_ref = _predict_reference_botorch_gp(ref_model, X_test)
 
         np.testing.assert_allclose(mean_ours, mean_ref, rtol=0.1)
@@ -809,13 +822,13 @@ class TestSingleTaskGPSurrogateVsReferenceEdgeCases:
     def test_matches_reference_many_points(self):
         """Output matches BoTorch with many training points."""
         X = np.linspace(0, 1, 50).reshape(-1, 1)
-        y = np.sin(2 * np.pi * X).ravel()
+        y = np.sin(2 * np.pi * X)
         X_test = np.array([[0.15], [0.35], [0.55], [0.85]])
 
         gp = SingleTaskGPSurrogate().fit(X, y)
         mean_ours, std_ours = gp.predict(X_test)
 
-        ref_model = _fit_reference_botorch_gp(X, y)
+        ref_model = _fit_reference_botorch_gp(X, y.ravel())
         mean_ref, std_ref = _predict_reference_botorch_gp(ref_model, X_test)
 
         np.testing.assert_allclose(mean_ours, mean_ref, rtol=0.1)

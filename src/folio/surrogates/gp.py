@@ -157,8 +157,8 @@ class SingleTaskGPSurrogate(Surrogate):
         ----------
         X : np.ndarray, shape (n_samples, n_features)
             Training input features. Each row is an observation.
-        y : np.ndarray, shape (n_samples,)
-            Training target values.
+        y : np.ndarray, shape (n_samples, 1)
+            Training target values. Must be 2D with single column.
 
         Returns
         -------
@@ -168,7 +168,7 @@ class SingleTaskGPSurrogate(Surrogate):
         Raises
         ------
         ValueError
-            If y.ndim != 1 (must be 1D array).
+            If y is not 2D with shape (n, 1).
         ValueError
             If X.shape[0] != y.shape[0] (different number of samples).
         ValueError
@@ -203,15 +203,15 @@ class SingleTaskGPSurrogate(Surrogate):
             )
         if X.shape[0] < 1:
             raise ValueError(f"Cannot fit model with {X.shape[0]} observations")
-        if y.ndim != 1:
-            raise ValueError("y must be an 1d array")
+        if y.ndim != 2 or y.shape[1] != 1:
+            raise ValueError("y must be 2D array with shape (n, 1)")
         if X.dtype != np.float64:
             raise ValueError(f"X must be float64, got {X.dtype}")
         if y.dtype != np.float64:
             raise ValueError(f"y must be float64, got {y.dtype}")
 
         X = torch.tensor(X, dtype=torch.float64)
-        y = torch.tensor(y, dtype=torch.float64).unsqueeze(-1)
+        y = torch.tensor(y, dtype=torch.float64)
 
         self.n_features = X.shape[1]
         ard_features = self.n_features if self.ard else None

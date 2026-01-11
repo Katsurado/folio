@@ -1,5 +1,6 @@
 """Target classes for extracting optimization objectives from observations."""
 
+from folio.targets.base import ScalarTarget
 from folio.targets.builtin import (
     DerivedTarget,
     DifferenceTarget,
@@ -10,6 +11,7 @@ from folio.targets.builtin import (
 )
 
 __all__ = [
+    "ScalarTarget",
     "DirectTarget",
     "DerivedTarget",
     "DistanceTarget",

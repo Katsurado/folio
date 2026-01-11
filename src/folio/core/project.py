@@ -12,6 +12,7 @@ from folio.targets import (
     DifferenceTarget,
     DirectTarget,
     RatioTarget,
+    ScalarTarget,
     SlopeTarget,
 )
 
@@ -21,12 +22,15 @@ if TYPE_CHECKING:
 
 @dataclass
 class Project:
-    """Experiment schema defining inputs, outputs, target, and recommender.
+    """Experiment schema defining inputs, outputs, targets, and recommender.
 
     A Project defines the structure of an experiment series: what inputs can be
-    varied, what outputs are measured, what target to optimize, and how to suggest
+    varied, what outputs are measured, what targets to optimize, and how to suggest
     new experiments. Projects are persisted to the database and can be retrieved
     by name.
+
+    Supports both single-objective and multi-objective optimization. For multi-objective,
+    provide multiple TargetConfig entries in target_configs and a reference_point.
 
     Parameters
     ----------
@@ -40,8 +44,15 @@ class Project:
     outputs : list[OutputSpec]
         Output variable specifications. Must have at least one output.
         Names must be unique within the project.
-    target_config : TargetConfig
-        Configuration for the optimization target.
+    target_configs : list[TargetConfig]
+        Configuration for optimization target(s). Must have at least one.
+        For single-objective, provide one TargetConfig. For multi-objective,
+        provide multiple TargetConfig entries.
+    reference_point : list[float] | None, optional
+        Reference point for multi-objective hypervolume calculation. Required
+        when len(target_configs) > 1 (multi-objective optimization). The length
+        must equal len(target_configs), i.e., one reference value per objective.
+        Ignored for single-objective optimization.
     recommender_config : RecommenderConfig, optional
         Configuration for the experiment recommender. Defaults to Bayesian
         optimization with GP surrogate and EI acquisition.
@@ -50,10 +61,14 @@ class Project:
     ------
     InvalidSchemaError
         If name is empty, no inputs/outputs defined, duplicate names exist,
-        input bounds are invalid, or target references a non-existent output.
+        input bounds are invalid, target references a non-existent output,
+        reference_point is missing for multi-objective, or
+        len(reference_point) != len(target_configs).
 
     Examples
     --------
+    Single-objective optimization:
+
     >>> project = Project(
     ...     id=None,
     ...     name="yield_optimization",
@@ -62,7 +77,21 @@ class Project:
     ...         InputSpec("solvent", "categorical", levels=["water", "ethanol"]),
     ...     ],
     ...     outputs=[OutputSpec("yield"), OutputSpec("purity")],
-    ...     target_config=TargetConfig(objective="yield", objective_mode="maximize"),
+    ...     target_configs=[TargetConfig(objective="yield", objective_mode="maximize")],
+    ... )
+
+    Multi-objective optimization:
+
+    >>> project = Project(
+    ...     id=None,
+    ...     name="pareto_optimization",
+    ...     inputs=[InputSpec("x", "continuous", bounds=(0.0, 1.0))],
+    ...     outputs=[OutputSpec("yield"), OutputSpec("purity")],
+    ...     target_configs=[
+    ...         TargetConfig(objective="yield", objective_mode="maximize"),
+    ...         TargetConfig(objective="purity", objective_mode="maximize"),
+    ...     ],
+    ...     reference_point=[0.0, 0.0],
     ... )
     """
 
@@ -70,7 +99,8 @@ class Project:
     name: str
     inputs: list[InputSpec]
     outputs: list[OutputSpec]
-    target_config: TargetConfig
+    target_configs: list[TargetConfig]
+    reference_point: list[float] | None = None
     recommender_config: RecommenderConfig = field(default_factory=RecommenderConfig)
 
     def __post_init__(self) -> None:
@@ -80,13 +110,22 @@ class Project:
         """Validate project schema at construction.
 
         Checks that the project has a non-empty name, at least one input and
-        output, no duplicate names, valid input bounds/levels, and that direct
-        targets reference existing outputs.
+        output, no duplicate names, valid input bounds/levels, that direct
+        targets reference existing outputs, and that reference_point is valid
+        for multi-objective optimization.
 
         Raises
         ------
         InvalidSchemaError
-            If any validation check fails.
+            If any of the following validation checks fail:
+            - Project name is empty
+            - No inputs or outputs defined
+            - Duplicate input or output names
+            - Continuous input missing bounds or has invalid bounds (lower >= upper)
+            - Categorical input missing levels
+            - Direct target references non-existent output
+            - Multi-objective (len(target_configs) > 1) but reference_point is None
+            - len(reference_point) != len(target_configs) when reference_point provided
         """
         if not self.name:
             raise InvalidSchemaError("Project name cannot be empty")
@@ -94,6 +133,8 @@ class Project:
             raise InvalidSchemaError("Project must have at least one input")
         if not self.outputs:
             raise InvalidSchemaError("Project must have at least one output")
+        if not self.target_configs:
+            raise InvalidSchemaError("Project must have at least one target_config")
 
         # Check for duplicate input names
         input_names = [inp.name for inp in self.inputs]
@@ -128,14 +169,38 @@ class Project:
                     f"got '{inp.type}'"
                 )
 
-        # Validate target references a valid output for direct targets
-        if self.target_config.target_type == "direct":
-            output_names_set = set(output_names)
-            if self.target_config.objective not in output_names_set:
+        # Validate reference_point for multi-objective
+        if self.is_multi_objective():
+            if self.reference_point is None:
                 raise InvalidSchemaError(
-                    f"Target '{self.target_config.objective}' not in outputs. "
-                    f"Available: {output_names}"
+                    "reference_point is required for multi-objective optimization "
+                    f"(len(target_configs) = {len(self.target_configs)})"
                 )
+            if len(self.reference_point) != len(self.target_configs):
+                raise InvalidSchemaError(
+                    f"reference_point length ({len(self.reference_point)}) must equal "
+                    f"number of target_configs ({len(self.target_configs)})"
+                )
+
+        # Validate each target references a valid output for direct targets
+        output_names_set = set(output_names)
+        for config in self.target_configs:
+            if config.target_type == "direct":
+                if config.objective not in output_names_set:
+                    raise InvalidSchemaError(
+                        f"Target '{config.objective}' not in outputs. "
+                        f"Available: {output_names}"
+                    )
+
+    def is_multi_objective(self) -> bool:
+        """Check if this project has multiple optimization objectives.
+
+        Returns
+        -------
+        bool
+            True if len(target_configs) > 1, False otherwise.
+        """
+        return len(self.target_configs) > 1
 
     def validate_inputs(self, inputs: dict[str, float | str]) -> None:
         """Validate input values against the project schema.
@@ -276,7 +341,7 @@ class Project:
         ...         InputSpec("x2", "continuous", bounds=(-5.0, 5.0)),
         ...     ],
         ...     outputs=[OutputSpec("y")],
-        ...     target_config=TargetConfig(objective="y"),
+        ...     target_configs=[TargetConfig(objective="y")],
         ... )
         >>> project.get_optimization_bounds()
         array([[ 0., -5.],
@@ -298,20 +363,24 @@ class Project:
 
         return opt_bounds
 
-    def get_target(self) -> DirectTarget | RatioTarget | DifferenceTarget | SlopeTarget:
-        """Create the appropriate target instance based on target_config.
+    def get_target(self, config: TargetConfig) -> ScalarTarget:
+        """Create the appropriate target instance based on a TargetConfig.
+
+        Parameters
+        ----------
+        config : TargetConfig
+            The target configuration to create a target from.
 
         Returns
         -------
-        DirectTarget | RatioTarget | DifferenceTarget | SlopeTarget
-            Target instance configured according to target_config.
+        ScalarTarget
+            Target instance configured according to the provided config.
 
         Raises
         ------
         ValueError
-            If target_config.target_type is not a recognized type.
+            If config.target_type is not a recognized type.
         """
-        config = self.target_config
         if config.target_type == "direct":
             return DirectTarget(config.objective, config.objective_mode)
         elif config.target_type == "ratio":
@@ -327,14 +396,46 @@ class Project:
         else:
             raise ValueError(f"Unknown target type: {config.target_type}")
 
+    def get_targets(self) -> list[ScalarTarget]:
+        """Create target instances for all target_configs.
+
+        Creates a Target instance for each TargetConfig in target_configs.
+        Works for both single-objective (one target_config) and multi-objective
+        (multiple target_configs). Each target can be any type (direct, ratio,
+        difference, slope) - they don't all need to be the same type.
+
+        Returns
+        -------
+        list[ScalarTarget]
+            List of target instances, one per target_config. Length equals
+            len(target_configs).
+
+        Examples
+        --------
+        >>> # Single-objective project
+        >>> len(project.target_configs)  # 1
+        >>> targets = project.get_targets()
+        >>> len(targets)  # 1
+
+        >>> # Multi-objective project with mixed target types
+        >>> len(project.target_configs)  # 2
+        >>> targets = project.get_targets()
+        >>> len(targets)  # 2
+        """
+        # TODO: Implement the following logic:
+        # 1. For each config in self.target_configs:
+        #    - Call self.get_target(config)
+        # 2. Return list of target instances
+        raise NotImplementedError
+
     def get_training_data(
         self, observations: list["Observation"]
     ) -> tuple[np.ndarray, np.ndarray]:
         """Extract training data arrays from observations.
 
-        Converts observations into (X, y) arrays suitable for model training.
+        Converts observations into (X, Y) arrays suitable for model training.
         Automatically filters out failed observations and those with missing
-        target values.
+        target values. Y is always 2D with shape (n, m) where m = len(target_configs).
 
         Parameters
         ----------
@@ -343,29 +444,43 @@ class Project:
 
         Returns
         -------
-        X : np.ndarray, shape (n_valid, n_inputs)
+        X : np.ndarray, shape (n_valid, n_inputs), dtype float64
             Input values for valid observations. Columns are in input definition order.
-        y : np.ndarray, shape (n_valid,)
-            Target values computed from valid observations.
+        Y : np.ndarray, shape (n_valid, n_targets), dtype float64
+            Target values computed from valid observations. n_targets equals
+            len(target_configs). Columns are in target_configs definition order.
 
         Notes
         -----
         Observations are excluded from training data if:
         - The observation is marked as failed (obs.failed is True)
-        - The target value cannot be computed (returns None)
-        """
+        - ANY target value cannot be computed (returns None)
 
-        target = self.get_target()
-        input_names = [inp.name for inp in self.inputs]
-        X_rows = []
-        y_values = []
-        for obs in observations:
-            if obs.failed:
-                continue
-            y = target.compute(obs)
-            if y is None:
-                continue
-            row = [obs.inputs[name] for name in input_names]
-            X_rows.append(row)
-            y_values.append(y)
-        return np.array(X_rows, dtype=np.float64), np.array(y_values, dtype=np.float64)
+        For multi-objective optimization, an observation is only included if ALL
+        targets can be computed. This ensures X and Y have consistent row counts.
+
+        Examples
+        --------
+        >>> # Single-objective
+        >>> X, Y = project.get_training_data(observations)
+        >>> X.shape  # (n, d)
+        >>> Y.shape  # (n, 1)
+
+        >>> # Multi-objective with 2 target_configs
+        >>> X, Y = project.get_training_data(observations)
+        >>> X.shape  # (n, d)
+        >>> Y.shape  # (n, 2)
+        """
+        # TODO: Implement the following logic:
+        # 1. targets = self.get_targets()  # List of Target objects
+        # 2. input_names = [inp.name for inp in self.inputs]
+        # 3. Initialize X_rows = [], Y_rows = []
+        # 4. For each observation in observations:
+        #    a. Skip if obs.failed
+        #    b. Compute target value for EACH target in targets
+        #    c. If ANY target returns None, skip this observation
+        #    d. Otherwise, append input row to X_rows and target values to Y_rows
+        # 5. Return (np.array(X_rows, dtype=float64), np.array(Y_rows, dtype=float64))
+        #
+        # Note: Y should always be 2D with shape (n, m) where m = len(targets)
+        raise NotImplementedError

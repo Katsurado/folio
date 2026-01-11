@@ -124,7 +124,7 @@ class Recommender(ABC):
         """
         X, y = self.project.get_training_data(observations)
         bounds = self.project.get_optimization_bounds()
-        objective = self.project.target_config.objective_mode
+        objective = self.project.target_configs[0].objective_mode
         candidate = self.recommend_from_data(X, y, bounds, objective)
         names = [inp.name for inp in self.project.inputs if inp.type == "continuous"]
 

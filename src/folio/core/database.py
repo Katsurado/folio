@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS projects (
     name TEXT UNIQUE NOT NULL,
     inputs_json TEXT NOT NULL,
     outputs_json TEXT NOT NULL,
-    target_config_json TEXT NOT NULL,
+    target_configs_json TEXT NOT NULL,
+    reference_point_json TEXT,
     recommender_config_json TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -174,36 +175,72 @@ def _deserialize_outputs(outputs_json: str) -> list[OutputSpec]:
     return [OutputSpec(**d) for d in json.loads(outputs_json)]
 
 
-def _serialize_target_config(config: TargetConfig) -> str:
-    """Serialize TargetConfig to JSON string for database storage.
+def _serialize_target_configs(configs: list[TargetConfig]) -> str:
+    """Serialize list of TargetConfig to JSON string for database storage.
 
     Parameters
     ----------
-    config : TargetConfig
-        Target configuration to serialize.
+    configs : list[TargetConfig]
+        Target configurations to serialize.
 
     Returns
     -------
     str
         JSON string representation.
     """
-    return json.dumps(asdict(config))
+    return json.dumps([asdict(config) for config in configs])
 
 
-def _deserialize_target_config(config_json: str) -> TargetConfig:
-    """Deserialize JSON string to TargetConfig.
+def _deserialize_target_configs(configs_json: str) -> list[TargetConfig]:
+    """Deserialize JSON string to list of TargetConfig.
 
     Parameters
     ----------
-    config_json : str
+    configs_json : str
         JSON string from database.
 
     Returns
     -------
-    TargetConfig
-        Reconstructed target configuration.
+    list[TargetConfig]
+        Reconstructed target configurations.
     """
-    return TargetConfig(**json.loads(config_json))
+    return [TargetConfig(**d) for d in json.loads(configs_json)]
+
+
+def _serialize_reference_point(ref_point: list[float] | None) -> str | None:
+    """Serialize reference_point to JSON string for database storage.
+
+    Parameters
+    ----------
+    ref_point : list[float] | None
+        Reference point to serialize.
+
+    Returns
+    -------
+    str | None
+        JSON string representation, or None if ref_point is None.
+    """
+    if ref_point is None:
+        return None
+    return json.dumps(ref_point)
+
+
+def _deserialize_reference_point(ref_point_json: str | None) -> list[float] | None:
+    """Deserialize JSON string to reference_point.
+
+    Parameters
+    ----------
+    ref_point_json : str | None
+        JSON string from database.
+
+    Returns
+    -------
+    list[float] | None
+        Reconstructed reference point, or None if input is None.
+    """
+    if ref_point_json is None:
+        return None
+    return json.loads(ref_point_json)
 
 
 def _serialize_recommender_config(config: RecommenderConfig) -> str:
@@ -256,7 +293,8 @@ def _row_to_project(row: sqlite3.Row) -> Project:
         name=row["name"],
         inputs=_deserialize_inputs(row["inputs_json"]),
         outputs=_deserialize_outputs(row["outputs_json"]),
-        target_config=_deserialize_target_config(row["target_config_json"]),
+        target_configs=_deserialize_target_configs(row["target_configs_json"]),
+        reference_point=_deserialize_reference_point(row["reference_point_json"]),
         recommender_config=_deserialize_recommender_config(
             row["recommender_config_json"]
         ),
@@ -289,14 +327,16 @@ def create_project(project: Project, db_path: Path = DEFAULT_DB_PATH) -> Project
             cursor = conn.execute(
                 """
                 INSERT INTO projects (name, inputs_json, outputs_json,
-                                      target_config_json, recommender_config_json)
-                VALUES (?, ?, ?, ?, ?)
+                                      target_configs_json, reference_point_json,
+                                      recommender_config_json)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
                     project.name,
                     _serialize_inputs(project.inputs),
                     _serialize_outputs(project.outputs),
-                    _serialize_target_config(project.target_config),
+                    _serialize_target_configs(project.target_configs),
+                    _serialize_reference_point(project.reference_point),
                     _serialize_recommender_config(project.recommender_config),
                 ),
             )
@@ -313,7 +353,8 @@ def create_project(project: Project, db_path: Path = DEFAULT_DB_PATH) -> Project
         name=project.name,
         inputs=project.inputs,
         outputs=project.outputs,
-        target_config=project.target_config,
+        target_configs=project.target_configs,
+        reference_point=project.reference_point,
         recommender_config=project.recommender_config,
     )
 

@@ -27,7 +27,7 @@ def sample_project():
             InputSpec(name="solvent", type="categorical", levels=["water", "ethanol"]),
         ],
         outputs=[OutputSpec(name="yield", units="%")],
-        target_config=TargetConfig(objective="yield", objective_mode="maximize"),
+        target_configs=[TargetConfig(objective="yield", objective_mode="maximize")],
     )
 
 
@@ -48,8 +48,8 @@ class TestProjectCRUD:
         assert len(retrieved.outputs) == 1
         assert retrieved.outputs[0].name == "yield"
         assert retrieved.outputs[0].units == "%"
-        assert retrieved.target_config.objective == "yield"
-        assert retrieved.target_config.objective_mode == "maximize"
+        assert retrieved.target_configs[0].objective == "yield"
+        assert retrieved.target_configs[0].objective_mode == "maximize"
 
     def test_delete_project(self, temp_db, sample_project):
         create_project(sample_project, db_path=temp_db)
