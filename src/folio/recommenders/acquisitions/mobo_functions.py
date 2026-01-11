@@ -4,6 +4,9 @@ from typing import Literal
 
 import torch
 from botorch.acquisition import AcquisitionFunction
+from botorch.acquisition.multi_objective.logei import (
+    qLogNoisyExpectedHypervolumeImprovement,
+)
 from botorch.models.model import Model
 
 from folio.recommenders.acquisitions.mobo_base import MultiObjectiveAcquisition
@@ -17,9 +20,9 @@ class NEHVI(MultiObjectiveAcquisition):
     noise. It naturally balances exploration and exploitation across all objectives
     simultaneously, favoring points that are likely to expand the Pareto frontier.
 
-    This implementation wraps BoTorch's qNoisyExpectedHypervolumeImprovement,
-    which handles noisy observations and supports batch acquisition (q > 1
-    candidates per iteration).
+    This implementation wraps BoTorch's qLogNoisyExpectedHypervolumeImprovement,
+    which handles noisy observations, supports batch acquisition (q > 1
+    candidates per iteration), and has better numerical stability.
 
     Parameters
     ----------
@@ -79,7 +82,7 @@ class NEHVI(MultiObjectiveAcquisition):
         ref_point: list[float],
         maximize: list[bool],
     ) -> AcquisitionFunction:
-        """Build a BoTorch qNoisyExpectedHypervolumeImprovement acquisition function.
+        """Build a BoTorch qLogNoisyExpectedHypervolumeImprovement acquisition function.
 
         Constructs an NEHVI acquisition function using the provided multi-output
         model and observed data. The acquisition function can then be optimized
@@ -109,10 +112,35 @@ class NEHVI(MultiObjectiveAcquisition):
         Returns
         -------
         AcquisitionFunction
-            A BoTorch qNoisyExpectedHypervolumeImprovement instance configured
+            A BoTorch qLogNoisyExpectedHypervolumeImprovement instance configured
             with the provided model, baseline data, and reference point.
+
+        Raises
+        ------
+        ValueError
+            If X_baseline is empty (no observations).
+        ValueError
+            If len(maximize) != number of objectives in Y.
         """
-        ...
+        if X_baseline.shape[0] == 0:
+            raise ValueError(
+                "X_baseline cannot be empty; at least one observation required"
+            )
+
+        n_objectives = Y.shape[1] if Y.dim() > 1 else 1
+        if len(maximize) != n_objectives:
+            raise ValueError(
+                f"len(maximize)={len(maximize)} must "
+                f"match number of objectives={n_objectives}"
+            )
+
+        y_max, ref_max = self._prepare_for_maximization(Y, ref_point, maximize)
+
+        nehvi = qLogNoisyExpectedHypervolumeImprovement(
+            model=model, ref_point=ref_max, X_baseline=X_baseline, alpha=self.alpha
+        )
+
+        return nehvi
 
 
 class ParEGO(MultiObjectiveAcquisition):

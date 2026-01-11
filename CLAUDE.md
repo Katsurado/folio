@@ -66,6 +66,27 @@ Two interfaces:
 2. Developer writes: implementation
 3. Run pytest → iterate until green
 
+### Implementation Boundaries
+
+By default, Claude Code builds scaffolding but leaves core logic for the developer.
+
+**Claude Code writes:**
+- Function/method signatures with type hints
+- Docstrings (NumPy-style)
+- Import statements
+- Test cases
+- Class structure and inheritance
+- `__init__` methods (storing parameters, basic validation)
+- Simple boilerplate (dataclasses, property accessors, `__repr__`, etc.)
+- Straightforward glue code
+
+**Claude Code leaves as `...` or `raise NotImplementedError()`:**
+- Core algorithm implementations
+- Complex business logic
+- Non-trivial data transformations
+
+**Exception:** If the user says "IMPLEMENT THIS DIRECTLY" (all caps), write the full implementation.
+
 Example:
 ```python
 # Claude Code writes this
