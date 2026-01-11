@@ -24,6 +24,9 @@ class MultiObjectiveAcquisition(ABC):
     - Swapping acquisition functions (EHVI, ParEGO, etc.) without changing the loop
     - Clean separation between user-facing config and BoTorch internals
 
+    All tensor inputs (X_baseline, Y) must be torch.float64 for numerical stability
+    with BoTorch's GP models and acquisition function optimization.
+
     Common multi-objective acquisition functions include:
 
     - **EHVI (Expected Hypervolume Improvement)**: Maximizes expected improvement
@@ -142,6 +145,32 @@ class MultiObjectiveAcquisition(ABC):
 
         return Y_max, ref_point_max
 
+    def _validate_dtype(self, X_baseline: torch.Tensor, Y: torch.Tensor) -> None:
+        """Validate that input tensors have float64 dtype.
+
+        BoTorch GP models and acquisition functions require float64 tensors for
+        numerical stability during optimization. This method raises an error if
+        the inputs have a different dtype.
+
+        Parameters
+        ----------
+        X_baseline : torch.Tensor
+            Input feature tensor to validate.
+        Y : torch.Tensor
+            Objective values tensor to validate.
+
+        Raises
+        ------
+        ValueError
+            If X_baseline or Y is not torch.float64.
+        """
+        if X_baseline.dtype != torch.float64:
+            raise ValueError(
+                f"X_baseline must be torch.float64, got {X_baseline.dtype}"
+            )
+        if Y.dtype != torch.float64:
+            raise ValueError(f"Y must be torch.float64, got {Y.dtype}")
+
     @abstractmethod
     def build(
         self,
@@ -163,13 +192,15 @@ class MultiObjectiveAcquisition(ABC):
             MultiTaskGP) with a posterior() method. The model should predict
             all objectives and be trained on observed data before calling build().
         X_baseline : torch.Tensor
-            Observed input points, shape (n_samples, n_features). Used by some
-            acquisition functions (like qNEHVI) to compute the current Pareto
-            frontier and cell decomposition for hypervolume calculation.
+            Observed input points, shape (n_samples, n_features), dtype float64.
+            Used by some acquisition functions (like qNEHVI) to compute the
+            current Pareto frontier and cell decomposition for hypervolume
+            calculation.
         Y : torch.Tensor
-            Observed objective values, shape (n_samples, n_objectives). Each row
-            contains the objective values for one observation. Used to determine
-            the current Pareto frontier and compute hypervolume improvement.
+            Observed objective values, shape (n_samples, n_objectives), dtype
+            float64. Each row contains the objective values for one observation.
+            Used to determine the current Pareto frontier and compute hypervolume
+            improvement.
         ref_point : list[float]
             Reference point for hypervolume calculation, length n_objectives.
             Must be dominated by all Pareto-optimal points (i.e., worse than

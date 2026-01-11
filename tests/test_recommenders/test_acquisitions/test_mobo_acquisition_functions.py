@@ -158,6 +158,51 @@ class TestPrepareForMaximization:
 
 
 # =============================================================================
+# _validate_dtype Tests
+# =============================================================================
+
+
+class TestValidateDtype:
+    """Tests for MultiObjectiveAcquisition._validate_dtype helper."""
+
+    def test_float64_passes(self):
+        """Test that float64 tensors pass validation."""
+        nehvi = NEHVI()
+        X = torch.tensor([[1.0, 2.0]], dtype=torch.float64)
+        Y = torch.tensor([[0.5, 0.3]], dtype=torch.float64)
+
+        # Should not raise
+        nehvi._validate_dtype(X, Y)
+
+    def test_float32_x_raises(self):
+        """Test that float32 X raises ValueError."""
+        nehvi = NEHVI()
+        X = torch.tensor([[1.0, 2.0]], dtype=torch.float32)
+        Y = torch.tensor([[0.5, 0.3]], dtype=torch.float64)
+
+        with pytest.raises(ValueError, match="X_baseline.*float64"):
+            nehvi._validate_dtype(X, Y)
+
+    def test_float32_y_raises(self):
+        """Test that float32 Y raises ValueError."""
+        nehvi = NEHVI()
+        X = torch.tensor([[1.0, 2.0]], dtype=torch.float64)
+        Y = torch.tensor([[0.5, 0.3]], dtype=torch.float32)
+
+        with pytest.raises(ValueError, match="Y.*float64"):
+            nehvi._validate_dtype(X, Y)
+
+    def test_both_float32_raises_on_x_first(self):
+        """Test that when both are float32, X is validated first."""
+        nehvi = NEHVI()
+        X = torch.tensor([[1.0, 2.0]], dtype=torch.float32)
+        Y = torch.tensor([[0.5, 0.3]], dtype=torch.float32)
+
+        with pytest.raises(ValueError, match="X_baseline.*float64"):
+            nehvi._validate_dtype(X, Y)
+
+
+# =============================================================================
 # NEHVI Init Tests
 # =============================================================================
 
@@ -513,6 +558,44 @@ class TestNEHVIInputValidation:
                 model=fitted_mogp,
                 X_baseline=X_empty,
                 Y=Y_empty,
+                ref_point=ref_point_max,
+                maximize=maximize_both,
+            )
+
+    def test_float32_x_baseline_raises(
+        self, fitted_mogp, Y_baseline, ref_point_max, maximize_both
+    ):
+        """Test that float32 X_baseline raises ValueError."""
+        nehvi = NEHVI()
+
+        X_float32 = torch.tensor([[0.0], [0.5], [1.0]], dtype=torch.float32)
+        Y_float64 = Y_baseline[:3]
+
+        with pytest.raises(ValueError, match="(?i)float64|dtype"):
+            nehvi.build(
+                model=fitted_mogp,
+                X_baseline=X_float32,
+                Y=Y_float64,
+                ref_point=ref_point_max,
+                maximize=maximize_both,
+            )
+
+    def test_float32_y_raises(
+        self, fitted_mogp, X_baseline, ref_point_max, maximize_both
+    ):
+        """Test that float32 Y raises ValueError."""
+        nehvi = NEHVI()
+
+        Y_float32 = torch.tensor(
+            [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], dtype=torch.float32
+        )
+        X_float64 = X_baseline[:3]
+
+        with pytest.raises(ValueError, match="(?i)float64|dtype"):
+            nehvi.build(
+                model=fitted_mogp,
+                X_baseline=X_float64,
+                Y=Y_float32,
                 ref_point=ref_point_max,
                 maximize=maximize_both,
             )

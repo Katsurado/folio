@@ -58,7 +58,7 @@ class _EIAcquisition(AcquisitionFunction):
 
         Parameters
         ----------
-        X : Tensor, shape (batch, q, d)
+        X : Tensor, shape (batch, q, d), dtype float64
             Candidate points to evaluate. batch is the number of batches,
             q is the number of candidates per batch (q-batch), d is input dimension.
 
@@ -66,6 +66,11 @@ class _EIAcquisition(AcquisitionFunction):
         -------
         Tensor, shape (batch,)
             EI values for each batch, summed over the q dimension.
+
+        Raises
+        ------
+        ValueError
+            If X is not torch.float64.
 
         Notes
         -----
@@ -89,6 +94,9 @@ class _EIAcquisition(AcquisitionFunction):
 
         7. Sum over q dimension: return ei.sum(dim=-1)
         """
+        if X.dtype != torch.float64:
+            raise ValueError(f"X must be torch.float64, got {X.dtype}")
+
         posterior = self.model.posterior(X)
         mean = posterior.mean.squeeze(-1)
         std = posterior.variance.sqrt().squeeze(-1)
@@ -241,13 +249,18 @@ class _UCBAcquisition(AcquisitionFunction):
 
         Parameters
         ----------
-        X : Tensor, shape (batch, q, d)
+        X : Tensor, shape (batch, q, d), dtype float64
             Candidate points to evaluate.
 
         Returns
         -------
         Tensor, shape (batch,)
             UCB values for each batch, summed over the q dimension.
+
+        Raises
+        ------
+        ValueError
+            If X is not torch.float64.
 
         Notes
         -----
@@ -260,6 +273,9 @@ class _UCBAcquisition(AcquisitionFunction):
            - minimize: ucb = -mean + beta * std
         4. Sum over q dimension: return ucb.sum(dim=-1)
         """
+        if X.dtype != torch.float64:
+            raise ValueError(f"X must be torch.float64, got {X.dtype}")
+
         posterior = self.model.posterior(X)
         mean = posterior.mean.squeeze(-1)
         std = posterior.variance.sqrt().squeeze(-1)

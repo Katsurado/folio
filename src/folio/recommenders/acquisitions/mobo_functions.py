@@ -95,12 +95,12 @@ class NEHVI(MultiObjectiveAcquisition):
             SingleTaskGP per objective, or a MultiTaskGP). Must have a
             posterior() method that returns predictions for all objectives.
         X_baseline : torch.Tensor
-            Observed input points, shape (n_samples, n_features). Used to
-            compute the current Pareto frontier for hypervolume calculation.
+            Observed input points, shape (n_samples, n_features), dtype float64.
+            Used to compute the current Pareto frontier for hypervolume calculation.
         Y : torch.Tensor
-            Observed objective values, shape (n_samples, n_objectives).
-            Pass original values; negation for minimization objectives is
-            handled internally based on the maximize parameter.
+            Observed objective values, shape (n_samples, n_objectives), dtype
+            float64. Pass original values; negation for minimization objectives
+            is handled internally based on the maximize parameter.
         ref_point : list[float]
             Reference point for hypervolume calculation, length n_objectives.
             Must be dominated by all Pareto-optimal points. Pass original
@@ -121,7 +121,11 @@ class NEHVI(MultiObjectiveAcquisition):
             If X_baseline is empty (no observations).
         ValueError
             If len(maximize) != number of objectives in Y.
+        ValueError
+            If X_baseline or Y is not torch.float64.
         """
+        self._validate_dtype(X_baseline, Y)
+
         if X_baseline.shape[0] == 0:
             raise ValueError(
                 "X_baseline cannot be empty; at least one observation required"
@@ -262,12 +266,12 @@ class ParEGO(MultiObjectiveAcquisition):
             A fitted BoTorch multi-output model (e.g., ModelListGP or
             MultiTaskGP). Must have a posterior() method.
         X_baseline : torch.Tensor
-            Observed input points, shape (n_samples, n_features). Used to
-            estimate the utopia point for Chebyshev scalarization.
+            Observed input points, shape (n_samples, n_features), dtype float64.
+            Used to estimate the utopia point for Chebyshev scalarization.
         Y : torch.Tensor
-            Observed objective values, shape (n_samples, n_objectives).
-            Pass original values; negation for minimization objectives is
-            handled internally based on the maximize parameter.
+            Observed objective values, shape (n_samples, n_objectives), dtype
+            float64. Pass original values; negation for minimization objectives
+            is handled internally based on the maximize parameter.
         ref_point : list[float]
             Reference point, length n_objectives. For ParEGO, this may be
             used to help estimate the utopia/nadir points for normalization.

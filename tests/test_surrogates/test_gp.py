@@ -200,6 +200,42 @@ class TestSingleTaskGPSurrogateFit:
         assert not np.allclose(mean1, mean2)
 
 
+class TestSingleTaskGPSurrogateDtype:
+    """Test SingleTaskGPSurrogate dtype validation."""
+
+    def test_fit_float32_x_raises(self):
+        """fit() raises ValueError for float32 X."""
+        X = np.array([[0.0], [0.5], [1.0]], dtype=np.float32)
+        y = np.array([0.0, 0.5, 1.0], dtype=np.float64)
+        with pytest.raises(ValueError, match="float64"):
+            SingleTaskGPSurrogate().fit(X, y)
+
+    def test_fit_float32_y_raises(self):
+        """fit() raises ValueError for float32 y."""
+        X = np.array([[0.0], [0.5], [1.0]], dtype=np.float64)
+        y = np.array([0.0, 0.5, 1.0], dtype=np.float32)
+        with pytest.raises(ValueError, match="float64"):
+            SingleTaskGPSurrogate().fit(X, y)
+
+    def test_predict_float32_x_raises(self):
+        """predict() raises ValueError for float32 X."""
+        X = np.array([[0.0], [0.5], [1.0]], dtype=np.float64)
+        y = np.array([0.0, 0.5, 1.0], dtype=np.float64)
+        gp = SingleTaskGPSurrogate().fit(X, y)
+        X_test = np.array([[0.25]], dtype=np.float32)
+        with pytest.raises(ValueError, match="float64"):
+            gp.predict(X_test)
+
+    def test_float64_passes(self):
+        """fit() and predict() work with float64."""
+        X = np.array([[0.0], [0.5], [1.0]], dtype=np.float64)
+        y = np.array([0.0, 0.5, 1.0], dtype=np.float64)
+        gp = SingleTaskGPSurrogate().fit(X, y)
+        X_test = np.array([[0.25]], dtype=np.float64)
+        mean, std = gp.predict(X_test)
+        assert mean.shape == (1,)
+
+
 class TestSingleTaskGPSurrogatePredict:
     """Test SingleTaskGPSurrogate predict method."""
 

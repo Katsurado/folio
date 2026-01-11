@@ -337,6 +337,28 @@ class TestExpectedImprovementEdgeCases:
         assert (results >= -1e-10).all()  # Allow small numerical errors
 
 
+class TestExpectedImprovementDtype:
+    """Tests for EI dtype validation."""
+
+    def test_float32_raises(self, fitted_gp, best_f_max):
+        """Test that float32 input raises ValueError."""
+        ei = ExpectedImprovement(xi=0.01)
+        acqf = ei.build(model=fitted_gp, best_f=best_f_max, maximize=True)
+
+        X = torch.tensor([[[0.3]]], dtype=torch.float32)
+        with pytest.raises(ValueError, match="float64"):
+            acqf(X)
+
+    def test_float64_passes(self, fitted_gp, best_f_max):
+        """Test that float64 input works."""
+        ei = ExpectedImprovement(xi=0.01)
+        acqf = ei.build(model=fitted_gp, best_f=best_f_max, maximize=True)
+
+        X = torch.tensor([[[0.3]]], dtype=torch.float64)
+        result = acqf(X)
+        assert result.shape == (1,)
+
+
 # =============================================================================
 # UpperConfidenceBound Tests
 # =============================================================================
@@ -572,6 +594,28 @@ class TestUpperConfidenceBoundEdgeCases:
         mean = posterior.mean.squeeze().item()
 
         assert np.isclose(ucb_value, mean, rtol=1e-5)
+
+
+class TestUpperConfidenceBoundDtype:
+    """Tests for UCB dtype validation."""
+
+    def test_float32_raises(self, fitted_gp, best_f_max):
+        """Test that float32 input raises ValueError."""
+        ucb = UpperConfidenceBound(beta=2.0)
+        acqf = ucb.build(model=fitted_gp, best_f=best_f_max, maximize=True)
+
+        X = torch.tensor([[[0.3]]], dtype=torch.float32)
+        with pytest.raises(ValueError, match="float64"):
+            acqf(X)
+
+    def test_float64_passes(self, fitted_gp, best_f_max):
+        """Test that float64 input works."""
+        ucb = UpperConfidenceBound(beta=2.0)
+        acqf = ucb.build(model=fitted_gp, best_f=best_f_max, maximize=True)
+
+        X = torch.tensor([[[0.3]]], dtype=torch.float64)
+        result = acqf(X)
+        assert result.shape == (1,)
 
 
 # =============================================================================

@@ -176,6 +176,8 @@ class MultiTaskGPSurrogate(Surrogate):
             If X.shape[0] != y.shape[0] (different number of samples).
         ValueError
             If X.shape[0] < 1 (no training samples).
+        ValueError
+            If X or y is not float64 dtype.
 
         Notes
         -----
@@ -205,6 +207,10 @@ class MultiTaskGPSurrogate(Surrogate):
             raise ValueError("y must be an 2d array")
         if y.shape[1] < 2:
             raise ValueError("use SingleTaskGPSurrogate for single output")
+        if X.dtype != np.float64:
+            raise ValueError(f"X must be float64, got {X.dtype}")
+        if y.dtype != np.float64:
+            raise ValueError(f"y must be float64, got {y.dtype}")
 
         X = torch.tensor(X, dtype=torch.float64)
         y = torch.tensor(y, dtype=torch.float64)
@@ -277,6 +283,8 @@ class MultiTaskGPSurrogate(Surrogate):
             If called before fit(). Must fit the model first.
         ValueError
             If X.shape[1] != n_features (feature dimension mismatch).
+        ValueError
+            If X is not float64 dtype.
 
         Notes
         -----
@@ -302,6 +310,8 @@ class MultiTaskGPSurrogate(Surrogate):
                 f"fitted with {self.n_features} features, "
                 f"but passed in new data with {X.shape[1]} features"
             )
+        if X.dtype != np.float64:
+            raise ValueError(f"X must be float64, got {X.dtype}")
 
         X = torch.tensor(X, dtype=torch.float64)
 

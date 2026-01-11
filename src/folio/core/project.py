@@ -354,6 +354,7 @@ class Project:
         - The observation is marked as failed (obs.failed is True)
         - The target value cannot be computed (returns None)
         """
+
         target = self.get_target()
         input_names = [inp.name for inp in self.inputs]
         X_rows = []
@@ -367,4 +368,4 @@ class Project:
             row = [obs.inputs[name] for name in input_names]
             X_rows.append(row)
             y_values.append(y)
-        return np.array(X_rows), np.array(y_values)
+        return np.array(X_rows, dtype=np.float64), np.array(y_values, dtype=np.float64)
