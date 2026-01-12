@@ -22,4 +22,4 @@ repos:
     rev: 0.7.1
     hooks:
       - id: nbstripout
-        files: demos/
+        files: \.ipynb$
