@@ -158,9 +158,9 @@ Note: `targets/` uses `TYPE_CHECKING` for `Observation` imports to avoid circula
 - **Project**: Experiment schema (inputs, outputs, target_configs list, reference_point, recommender_config). Supports single and multi-objective via `is_multi_objective()`.
 - **Observation**: Single data point (inputs dict, outputs dict, timestamp, notes, tag, images, failed)
 - **Target**: Extracts scalar optimization target from Observation (direct or derived from outputs)
-- **Recommender**: Suggests next experiments. Interface: `recommend(observations) → dict`, `recommend_from_data(X, y, bounds, objective) → np.ndarray`. Implementations: BayesianRecommender, RandomRecommender
+- **Recommender**: Suggests next experiments. Interface: `recommend(observations) → dict`, `recommend_from_data(X, y, bounds, maximize) → np.ndarray` where `maximize: list[bool]`. Implementations: BayesianRecommender, RandomRecommender
 - **Surrogate**: Model that fits observations. Interface: `fit(X, y)`, `predict(X) → (mean, std)`. SingleTaskGPSurrogate for single-output (y shape (n, 1)), MultiTaskGPSurrogate for correlated multi-output.
-- **Acquisition**: Single-objective (EI, UCB) and multi-objective (NEHVI, ParEGO). Internal to recommenders.
+- **Acquisition**: Single-objective (EI, UCB) and multi-objective (NEHVI). Internal to recommenders.
 - **Executor**: Runs experiments. HumanExecutor for manual, ClaudeLightExecutor for autonomous closed-loop
 
 ## Executor Interface
@@ -339,7 +339,7 @@ with pytest.raises(ValueError, match="Array shapes must match exactly"):
   - [x] Project with target_configs (list), reference_point, recommender_config
   - [x] Project.is_multi_objective() for single vs multi-objective detection
   - [x] Database: create/get/delete project, add/get observations
-  - [ ] Project.get_training_data() - prototype, needs implementation
+  - [x] Project.get_training_data() extracts (X, y) arrays from observations
 - [x] Target interface
   - [x] ScalarTarget ABC, DirectTarget, DerivedTarget, RatioTarget, DifferenceTarget, DistanceTarget, SlopeTarget
 - [x] Surrogate interface
@@ -348,11 +348,12 @@ with pytest.raises(ValueError, match="Array shapes must match exactly"):
   - [x] MultiTaskGPSurrogate: BoTorch multi-output GP with ICM kernel
 - [x] Acquisition interface (BoTorch-compatible)
   - [x] Single-objective: ExpectedImprovement, UpperConfidenceBound
-  - [x] Multi-objective: NEHVI (qLogNoisyExpectedHypervolumeImprovement), ParEGO
+  - [x] Multi-objective: NEHVI (qLogNoisyExpectedHypervolumeImprovement)
+  - [ ] ParEGO (not yet implemented)
 - [x] Recommender interface
   - [x] Recommender ABC with recommend() and recommend_from_data()
   - [x] RandomRecommender: uniform sampling within bounds
-  - [ ] BayesianRecommender: prototype, _build_surrogate/acquisition_for_project need implementation
+  - [x] BayesianRecommender: GP surrogate + acquisition optimization, surrogate property for state access
 - [ ] Add images field to Observation
 - [ ] Add procedure, hazards fields to Project
 - [ ] libSQL cloud sync support in Database

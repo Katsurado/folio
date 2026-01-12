@@ -98,9 +98,7 @@ class TargetConfig:
             If objective is not set or objective_mode is invalid.
         """
         if self.target_type == "direct" and self.objective is None:
-            raise InvalidSchemaError(
-                "Direct target requires 'objective' to be set."
-            )
+            raise InvalidSchemaError("Direct target requires 'objective' to be set.")
         if self.objective_mode not in ("maximize", "minimize"):
             raise InvalidSchemaError(
                 f"objective_mode must be 'maximize' or 'minimize', "
@@ -129,7 +127,7 @@ class RecommenderConfig:
         Defaults to "ei". Ignored for non-Bayesian recommenders.
     mo_acquisition : str, optional
         Acquisition function for multi-objective Bayesian optimization:
-        "nehvi" (Noisy Expected Hypervolume Improvement) or "parego".
+        "nehvi" (Noisy Expected Hypervolume Improvement).
         Defaults to "nehvi". Ignored for single-objective or non-Bayesian.
     n_initial : int, optional
         Number of initial random samples before using the surrogate model.
@@ -140,8 +138,7 @@ class RecommenderConfig:
         "normalize_inputs": True, "normalize_outputs": True}.
     acquisition_kwargs : dict[str, Any], optional
         Keyword arguments passed to the acquisition function constructor.
-        For EI: {"xi": 0.01}. For UCB: {"beta": 2.0}.
-        For NEHVI: {"alpha": 0.0}. For ParEGO: {"scalarization": "chebyshev"}.
+        For EI: {"xi": 0.01}. For UCB: {"beta": 2.0}. For NEHVI: {"alpha": 0.0}.
 
     Examples
     --------

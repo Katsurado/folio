@@ -6,13 +6,12 @@ from folio.recommenders.acquisitions.functions import (
     UpperConfidenceBound,
 )
 from folio.recommenders.acquisitions.mobo_base import MultiObjectiveAcquisition
-from folio.recommenders.acquisitions.mobo_functions import NEHVI, ParEGO
+from folio.recommenders.acquisitions.mobo_functions import NEHVI
 
 __all__ = [
     "Acquisition",
     "ExpectedImprovement",
     "MultiObjectiveAcquisition",
     "NEHVI",
-    "ParEGO",
     "UpperConfidenceBound",
 ]

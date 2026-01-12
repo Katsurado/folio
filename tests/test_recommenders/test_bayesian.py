@@ -727,11 +727,8 @@ class TestBayesianRecommenderSurrogateConfig:
         recommender._fit_surrogate(X, y)
         assert isinstance(recommender._surrogate, SingleTaskGPSurrogate)
 
-    @pytest.mark.skip(
-        reason="MultiTaskGP requires MultiObjectiveRecommender, not BayesianRecommender"
-    )
-    def test_multitask_gp_surrogate_selected(self, enough_observations):
-        """surrogate='multitask_gp' creates MultiTaskGPSurrogate."""
+    def test_multitask_gp_surrogate_selected(self):
+        """surrogate='multitask_gp' creates MultiTaskGPSurrogate for multi-objective."""
         from folio.surrogates import MultiTaskGPSurrogate
 
         torch.manual_seed(42)
@@ -742,16 +739,282 @@ class TestBayesianRecommenderSurrogateConfig:
                 InputSpec("x1", "continuous", bounds=(0.0, 10.0)),
                 InputSpec("x2", "continuous", bounds=(-5.0, 5.0)),
             ],
+            outputs=[OutputSpec("y1"), OutputSpec("y2")],
+            target_configs=[
+                TargetConfig(objective="y1", objective_mode="maximize"),
+                TargetConfig(objective="y2", objective_mode="minimize"),
+            ],
+            reference_point=[0.0, 10.0],
+            recommender_config=RecommenderConfig(
+                type="bayesian",
+                surrogate="multitask_gp",
+                mo_acquisition="nehvi",
+                n_initial=3,
+            ),
+        )
+        observations = [
+            Observation(
+                project_id=1,
+                inputs={"x1": 5.0, "x2": 0.0},
+                outputs={"y1": 10.0, "y2": 2.0},
+            ),
+            Observation(
+                project_id=1,
+                inputs={"x1": 2.0, "x2": -3.0},
+                outputs={"y1": 7.0, "y2": 5.0},
+            ),
+            Observation(
+                project_id=1,
+                inputs={"x1": 8.0, "x2": 2.0},
+                outputs={"y1": 15.0, "y2": 1.0},
+            ),
+        ]
+        recommender = BayesianRecommender(project)
+        X, y = project.get_training_data(observations)
+        recommender._fit_surrogate(X, y)
+        assert isinstance(recommender._surrogate, MultiTaskGPSurrogate)
+
+
+class TestBayesianRecommenderMultiObjective:
+    """Test BayesianRecommender with multi-objective optimization."""
+
+    @pytest.fixture
+    def multi_objective_project(self):
+        """Create a multi-objective project with 2 targets."""
+        return Project(
+            id=1,
+            name="multi_objective",
+            inputs=[
+                InputSpec("x1", "continuous", bounds=(0.0, 10.0)),
+                InputSpec("x2", "continuous", bounds=(-5.0, 5.0)),
+            ],
+            outputs=[OutputSpec("y1"), OutputSpec("y2")],
+            target_configs=[
+                TargetConfig(objective="y1", objective_mode="maximize"),
+                TargetConfig(objective="y2", objective_mode="minimize"),
+            ],
+            reference_point=[0.0, 10.0],
+            recommender_config=RecommenderConfig(
+                type="bayesian",
+                surrogate="multitask_gp",
+                mo_acquisition="nehvi",
+                n_initial=3,
+            ),
+        )
+
+    @pytest.fixture
+    def multi_objective_observations(self):
+        """Create observations for multi-objective testing."""
+        return [
+            Observation(
+                project_id=1,
+                inputs={"x1": 1.0, "x2": -2.0},
+                outputs={"y1": 5.0, "y2": 8.0},
+            ),
+            Observation(
+                project_id=1,
+                inputs={"x1": 5.0, "x2": 0.0},
+                outputs={"y1": 10.0, "y2": 3.0},
+            ),
+            Observation(
+                project_id=1,
+                inputs={"x1": 9.0, "x2": 2.0},
+                outputs={"y1": 8.0, "y2": 1.0},
+            ),
+            Observation(
+                project_id=1,
+                inputs={"x1": 3.0, "x2": -4.0},
+                outputs={"y1": 12.0, "y2": 5.0},
+            ),
+        ]
+
+    def test_multi_objective_recommend_returns_dict(
+        self, multi_objective_project, multi_objective_observations
+    ):
+        """recommend() returns dict for multi-objective project."""
+        torch.manual_seed(42)
+        recommender = BayesianRecommender(multi_objective_project)
+        result = recommender.recommend(multi_objective_observations)
+        assert isinstance(result, dict)
+        assert set(result.keys()) == {"x1", "x2"}
+
+    def test_multi_objective_recommend_within_bounds(
+        self, multi_objective_project, multi_objective_observations
+    ):
+        """recommend() returns values within bounds for multi-objective."""
+        torch.manual_seed(42)
+        recommender = BayesianRecommender(multi_objective_project)
+        result = recommender.recommend(multi_objective_observations)
+        assert 0.0 <= result["x1"] <= 10.0
+        assert -5.0 <= result["x2"] <= 5.0
+
+    def test_multi_objective_uses_nehvi(
+        self, multi_objective_project, multi_objective_observations
+    ):
+        """Multi-objective uses NEHVI (log variant) acquisition function."""
+        from botorch.acquisition.multi_objective.logei import (
+            qLogNoisyExpectedHypervolumeImprovement,
+        )
+
+        torch.manual_seed(42)
+        recommender = BayesianRecommender(multi_objective_project)
+        X, y = multi_objective_project.get_training_data(multi_objective_observations)
+        recommender._fit_surrogate(X, y)
+        acq = recommender._build_acquisition(X, y, [True, False])
+        assert isinstance(acq, qLogNoisyExpectedHypervolumeImprovement)
+
+    def test_multi_objective_training_data_shape(
+        self, multi_objective_project, multi_objective_observations
+    ):
+        """get_training_data returns correct shapes for multi-objective."""
+        X, y = multi_objective_project.get_training_data(multi_objective_observations)
+        assert X.shape == (4, 2)
+        assert y.shape == (4, 2)
+
+    def test_multi_objective_few_observations_returns_random(
+        self, multi_objective_project
+    ):
+        """Fewer than n_initial observations returns random sample."""
+        observations = [
+            Observation(
+                project_id=1,
+                inputs={"x1": 5.0, "x2": 0.0},
+                outputs={"y1": 10.0, "y2": 3.0},
+            ),
+            Observation(
+                project_id=1,
+                inputs={"x1": 2.0, "x2": -3.0},
+                outputs={"y1": 7.0, "y2": 5.0},
+            ),
+        ]
+        recommender = BayesianRecommender(multi_objective_project)
+        result = recommender.recommend(observations)
+        assert 0.0 <= result["x1"] <= 10.0
+        assert -5.0 <= result["x2"] <= 5.0
+        assert recommender.surrogate is None
+
+    def test_multi_objective_recommend_from_data(self, multi_objective_project):
+        """recommend_from_data works with multi-objective arrays."""
+        torch.manual_seed(42)
+        recommender = BayesianRecommender(multi_objective_project)
+        X = np.array([[1.0, -2.0], [5.0, 0.0], [9.0, 2.0], [3.0, -4.0]])
+        y = np.array([[5.0, 8.0], [10.0, 3.0], [8.0, 1.0], [12.0, 5.0]])
+        bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
+        result = recommender.recommend_from_data(X, y, bounds, [True, False])
+        assert result.shape == (2,)
+        assert np.all((bounds[0, :] <= result) & (result <= bounds[1, :]))
+
+
+class TestBayesianRecommenderErrorHandling:
+    """Test error handling in BayesianRecommender."""
+
+    @pytest.fixture
+    def simple_project(self):
+        """Create a simple single-objective project."""
+        return Project(
+            id=1,
+            name="test_project",
+            inputs=[
+                InputSpec("x1", "continuous", bounds=(0.0, 10.0)),
+                InputSpec("x2", "continuous", bounds=(-5.0, 5.0)),
+            ],
             outputs=[OutputSpec("y")],
             target_configs=[TargetConfig(objective="y", objective_mode="maximize")],
             recommender_config=RecommenderConfig(
                 type="bayesian",
-                surrogate="multitask_gp",
+                surrogate="gp",
                 acquisition="ei",
                 n_initial=3,
             ),
         )
+
+    def test_x_not_float64_raises(self, simple_project):
+        """recommend_from_data raises if X is not float64."""
+        recommender = BayesianRecommender(simple_project)
+        X = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], dtype=np.float32)
+        y = np.array([[1.0], [2.0], [3.0]], dtype=np.float64)
+        bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
+        with pytest.raises(ValueError, match="float64"):
+            recommender.recommend_from_data(X, y, bounds, [True])
+
+    def test_y_not_float64_raises(self, simple_project):
+        """recommend_from_data raises if y is not float64."""
+        recommender = BayesianRecommender(simple_project)
+        X = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], dtype=np.float64)
+        y = np.array([[1.0], [2.0], [3.0]], dtype=np.float32)
+        bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
+        with pytest.raises(ValueError, match="float64"):
+            recommender.recommend_from_data(X, y, bounds, [True])
+
+    def test_invalid_surrogate_type_raises(self):
+        """_build_surrogate raises for unknown surrogate type (single-objective)."""
+        project = Project(
+            id=1,
+            name="test",
+            inputs=[InputSpec("x", "continuous", bounds=(0.0, 1.0))],
+            outputs=[OutputSpec("y")],
+            target_configs=[TargetConfig(objective="y")],
+            recommender_config=RecommenderConfig(surrogate="invalid_surrogate"),
+        )
         recommender = BayesianRecommender(project)
-        X, y = project.get_training_data(enough_observations)
+        with pytest.raises(ValueError, match="(?i)unknown|surrogate"):
+            recommender._build_surrogate()
+
+    def test_invalid_mo_surrogate_type_raises(self):
+        """_build_surrogate raises for unknown surrogate type (multi-objective)."""
+        project = Project(
+            id=1,
+            name="test",
+            inputs=[InputSpec("x", "continuous", bounds=(0.0, 1.0))],
+            outputs=[OutputSpec("y1"), OutputSpec("y2")],
+            target_configs=[
+                TargetConfig(objective="y1"),
+                TargetConfig(objective="y2"),
+            ],
+            reference_point=[0.0, 0.0],
+            recommender_config=RecommenderConfig(surrogate="invalid_mo_surrogate"),
+        )
+        recommender = BayesianRecommender(project)
+        with pytest.raises(ValueError, match="(?i)unknown|surrogate"):
+            recommender._build_surrogate()
+
+    def test_invalid_acquisition_type_raises(self, simple_project):
+        """_build_acquisition raises for unknown acquisition type."""
+        project = Project(
+            id=1,
+            name="test",
+            inputs=[InputSpec("x", "continuous", bounds=(0.0, 1.0))],
+            outputs=[OutputSpec("y")],
+            target_configs=[TargetConfig(objective="y")],
+            recommender_config=RecommenderConfig(acquisition="invalid_acq"),
+        )
+        recommender = BayesianRecommender(project)
+        X = np.array([[0.2], [0.5], [0.8]])
+        y = np.array([[1.0], [2.0], [1.5]])
         recommender._fit_surrogate(X, y)
-        assert isinstance(recommender._surrogate, MultiTaskGPSurrogate)
+        with pytest.raises(ValueError, match="(?i)unknown|acquisition"):
+            recommender._build_acquisition(X, y, [True])
+
+    def test_invalid_mo_acquisition_type_raises(self):
+        """_build_acquisition raises for unknown multi-objective acquisition type."""
+        project = Project(
+            id=1,
+            name="test",
+            inputs=[InputSpec("x", "continuous", bounds=(0.0, 1.0))],
+            outputs=[OutputSpec("y1"), OutputSpec("y2")],
+            target_configs=[
+                TargetConfig(objective="y1"),
+                TargetConfig(objective="y2"),
+            ],
+            reference_point=[0.0, 0.0],
+            recommender_config=RecommenderConfig(
+                surrogate="multitask_gp",
+                mo_acquisition="invalid_mo_acq",
+            ),
+        )
+        recommender = BayesianRecommender(project)
+        X = np.array([[0.2], [0.5], [0.8]])
+        y = np.array([[1.0, 2.0], [2.0, 1.0], [1.5, 1.5]])
+        recommender._fit_surrogate(X, y)
+        with pytest.raises(ValueError, match="(?i)unknown|acquisition"):
+            recommender._build_acquisition(X, y, [True, True])

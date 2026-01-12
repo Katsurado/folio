@@ -342,3 +342,87 @@ class TestRandomRecommenderEdgeCases:
         for i in range(10):
             assert f"x{i}" in result
             assert 0.0 <= result[f"x{i}"] <= 1.0
+
+
+class TestRandomRecommenderMultiObjective:
+    """Test RandomRecommender with multi-objective projects."""
+
+    @pytest.fixture
+    def multi_objective_project(self):
+        """Create a multi-objective project with 2 targets."""
+        return Project(
+            id=1,
+            name="multi_objective",
+            inputs=[
+                InputSpec("x1", "continuous", bounds=(0.0, 10.0)),
+                InputSpec("x2", "continuous", bounds=(-5.0, 5.0)),
+            ],
+            outputs=[OutputSpec("y1"), OutputSpec("y2")],
+            target_configs=[
+                TargetConfig(objective="y1", objective_mode="maximize"),
+                TargetConfig(objective="y2", objective_mode="minimize"),
+            ],
+            reference_point=[0.0, 10.0],
+            recommender_config=RecommenderConfig(type="random"),
+        )
+
+    @pytest.fixture
+    def multi_objective_observations(self):
+        """Create observations for multi-objective testing."""
+        return [
+            Observation(
+                project_id=1,
+                inputs={"x1": 1.0, "x2": -2.0},
+                outputs={"y1": 5.0, "y2": 8.0},
+            ),
+            Observation(
+                project_id=1,
+                inputs={"x1": 5.0, "x2": 0.0},
+                outputs={"y1": 10.0, "y2": 3.0},
+            ),
+        ]
+
+    def test_multi_objective_recommend_returns_dict(
+        self, multi_objective_project, multi_objective_observations
+    ):
+        """recommend() returns dict for multi-objective project."""
+        recommender = RandomRecommender(multi_objective_project)
+        result = recommender.recommend(multi_objective_observations)
+        assert isinstance(result, dict)
+        assert set(result.keys()) == {"x1", "x2"}
+
+    def test_multi_objective_recommend_within_bounds(
+        self, multi_objective_project, multi_objective_observations
+    ):
+        """recommend() returns values within bounds for multi-objective."""
+        recommender = RandomRecommender(multi_objective_project)
+        for _ in range(10):
+            result = recommender.recommend(multi_objective_observations)
+            assert 0.0 <= result["x1"] <= 10.0
+            assert -5.0 <= result["x2"] <= 5.0
+
+    def test_multi_objective_recommend_from_data(self, multi_objective_project):
+        """recommend_from_data works with multi-objective arrays."""
+        recommender = RandomRecommender(multi_objective_project)
+        X = np.array([[1.0, -2.0], [5.0, 0.0]])
+        y = np.array([[5.0, 8.0], [10.0, 3.0]])
+        bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
+        result = recommender.recommend_from_data(X, y, bounds, [True, False])
+        assert result.shape == (2,)
+        assert np.all((bounds[0, :] <= result) & (result <= bounds[1, :]))
+
+    def test_multi_objective_training_data_shape(
+        self, multi_objective_project, multi_objective_observations
+    ):
+        """get_training_data returns correct shapes for multi-objective."""
+        X, y = multi_objective_project.get_training_data(multi_objective_observations)
+        assert X.shape == (2, 2)
+        assert y.shape == (2, 2)
+
+    def test_multi_objective_empty_observations(self, multi_objective_project):
+        """recommend() works with empty observations for multi-objective."""
+        recommender = RandomRecommender(multi_objective_project)
+        result = recommender.recommend([])
+        assert set(result.keys()) == {"x1", "x2"}
+        assert 0.0 <= result["x1"] <= 10.0
+        assert -5.0 <= result["x2"] <= 5.0
