@@ -141,7 +141,8 @@ src/folio/
 ├── surrogates/
 │   ├── base.py         # Surrogate ABC
 │   ├── gp.py           # SingleTaskGPSurrogate (BoTorch, single-output GP)
-│   └── multitask_gp.py # MultiTaskGPSurrogate (BoTorch, multi-output GP with ICM)
+│   ├── multitask_gp.py # MultiTaskGPSurrogate (BoTorch, multi-output GP with ICM)
+│   └── transforms.py   # TaskStandardize (per-task outcome normalization)
 ├── targets/
 │   ├── base.py         # ScalarTarget ABC
 │   └── builtin.py      # DirectTarget, RatioTarget, etc.
@@ -160,6 +161,7 @@ Note: `targets/` uses `TYPE_CHECKING` for `Observation` imports to avoid circula
 - **Target**: Extracts scalar optimization target from Observation (direct or derived from outputs)
 - **Recommender**: Suggests next experiments. Interface: `recommend(observations) → dict`, `recommend_from_data(X, y, bounds, maximize) → np.ndarray` where `maximize: list[bool]`. Implementations: BayesianRecommender, RandomRecommender
 - **Surrogate**: Model that fits observations. Interface: `fit(X, y)`, `predict(X) → (mean, std)`. SingleTaskGPSurrogate for single-output (y shape (n, 1)), MultiTaskGPSurrogate for correlated multi-output.
+- **TaskStandardize**: BoTorch OutcomeTransform for per-task standardization in MultiTaskGP. Solves scale imbalance when objectives have different magnitudes (e.g., MW ~10^5 vs PDI ~1-3).
 - **Acquisition**: Single-objective (EI, UCB) and multi-objective (NEHVI). Internal to recommenders.
 - **Executor**: Runs experiments. HumanExecutor for manual, ClaudeLightExecutor for autonomous closed-loop
 
@@ -346,6 +348,7 @@ with pytest.raises(ValueError, match="Array shapes must match exactly"):
   - [x] Surrogate ABC with fit/predict
   - [x] SingleTaskGPSurrogate: BoTorch single-output GP, y shape (n, 1)
   - [x] MultiTaskGPSurrogate: BoTorch multi-output GP with ICM kernel
+  - [x] TaskStandardize: per-task outcome transform for multi-objective scale balancing
 - [x] Acquisition interface (BoTorch-compatible)
   - [x] Single-objective: ExpectedImprovement, UpperConfidenceBound
   - [x] Multi-objective: NEHVI (qLogNoisyExpectedHypervolumeImprovement)
