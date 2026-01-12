@@ -29,7 +29,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ".[dev]"
-      - run: pytest --cov=folio --cov-report=xml -W "ignore::gpytorch.utils.warnings.NumericalWarning"
+      - run: pytest --cov=folio --cov-report=xml -W "ignore::gpytorch.utils.warnings.NumericalWarning" -W "ignore::linear_operator.utils.warnings.NumericalWarning" -W "ignore:torch.sparse.SparseTensor:UserWarning"
       - name: Upload coverage
         uses: codecov/codecov-action@v4
         if: matrix.python-version == '3.11'

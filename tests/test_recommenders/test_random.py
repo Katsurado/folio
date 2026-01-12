@@ -144,7 +144,7 @@ class TestRandomRecommenderRecommendFromData:
             X=np.empty((0, 2)),
             y=np.empty(0),
             bounds=bounds,
-            objective="maximize",
+            maximize=[True],
         )
         assert isinstance(result, np.ndarray)
 
@@ -156,7 +156,7 @@ class TestRandomRecommenderRecommendFromData:
             X=np.empty((0, 2)),
             y=np.empty(0),
             bounds=bounds,
-            objective="maximize",
+            maximize=[True],
         )
         assert result.shape == (2,)
 
@@ -169,7 +169,7 @@ class TestRandomRecommenderRecommendFromData:
                 X=np.empty((0, 2)),
                 y=np.empty(0),
                 bounds=bounds,
-                objective="maximize",
+                maximize=[True],
             )
             assert np.all((bounds[0, :] <= result) & (result <= bounds[1, :]))
 
@@ -180,7 +180,7 @@ class TestRandomRecommenderRecommendFromData:
         X = np.array([[5.0, 0.0], [2.0, -3.0]])
         y = np.array([10.0, 7.0])
         result = recommender.recommend_from_data(
-            X=X, y=y, bounds=bounds, objective="maximize"
+            X=X, y=y, bounds=bounds, maximize=[True]
         )
         # Should still return valid result within bounds
         assert np.all((bounds[0, :] <= result) & (result <= bounds[1, :]))
@@ -194,13 +194,13 @@ class TestRandomRecommenderRecommendFromData:
             X=np.empty((0, 2)),
             y=np.empty(0),
             bounds=bounds,
-            objective="maximize",
+            maximize=[True],
         )
         result_min = recommender.recommend_from_data(
             X=np.empty((0, 2)),
             y=np.empty(0),
             bounds=bounds,
-            objective="minimize",
+            maximize=[False],
         )
         assert np.all((bounds[0, :] <= result_max) & (result_max <= bounds[1, :]))
         assert np.all((bounds[0, :] <= result_min) & (result_min <= bounds[1, :]))
@@ -214,7 +214,7 @@ class TestRandomRecommenderRecommendFromData:
             X=np.empty((0, 1)),
             y=np.empty(0),
             bounds=bounds,
-            objective="maximize",
+            maximize=[True],
         )
         assert result.shape == (1,)
         assert 0.0 <= result[0] <= 1.0
@@ -243,7 +243,7 @@ class TestRandomRecommenderRecommendFromData:
             X=np.empty((0, 10)),
             y=np.empty(0),
             bounds=bounds,
-            objective="maximize",
+            maximize=[True],
         )
         assert result.shape == (10,)
         assert np.all((bounds[0, :] <= result) & (result <= bounds[1, :]))
@@ -274,7 +274,7 @@ class TestRandomRecommenderRandomness:
         bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
         results = [
             recommender.recommend_from_data(
-                X=np.empty((0, 2)), y=np.empty(0), bounds=bounds, objective="maximize"
+                X=np.empty((0, 2)), y=np.empty(0), bounds=bounds, maximize=[True]
             )
             for _ in range(10)
         ]

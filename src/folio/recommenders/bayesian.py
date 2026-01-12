@@ -1,6 +1,6 @@
 """Bayesian optimization recommender using GP surrogate and acquisition functions."""
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
@@ -8,9 +8,8 @@ from botorch.acquisition import AcquisitionFunction
 from botorch.optim.optimize import optimize_acqf
 
 from folio.recommenders.acquisitions import (
-    ExpectedImprovement,
     NEHVI,
-    ParEGO,
+    ExpectedImprovement,
     UpperConfidenceBound,
 )
 from folio.recommenders.base import Recommender
@@ -108,12 +107,27 @@ class BayesianRecommender(Recommender):
         super().__init__(project)
         self._surrogate = None
 
+    @property
+    def surrogate(self) -> SingleTaskGPSurrogate | MultiTaskGPSurrogate | None:
+        """The fitted surrogate model from the last recommend_from_data call.
+
+        Returns None if:
+        - recommend_from_data has not been called yet
+        - The last call had fewer than n_initial observations (random sampling)
+
+        Returns
+        -------
+        SingleTaskGPSurrogate | MultiTaskGPSurrogate | None
+            The fitted surrogate model, or None if not yet fitted.
+        """
+        return self._surrogate
+
     def recommend_from_data(
         self,
         X: np.ndarray,
         y: np.ndarray,
         bounds: np.ndarray,
-        objective: Literal["maximize", "minimize"],
+        maximize: list[bool],
     ) -> np.ndarray:
         """Suggest next experiment inputs from raw arrays.
 
@@ -125,13 +139,14 @@ class BayesianRecommender(Recommender):
         ----------
         X : np.ndarray, shape (n_samples, n_features)
             Training inputs from previous experiments.
-        y : np.ndarray, shape (n_samples,)
-            Training targets (scalar objective values).
+        y : np.ndarray, shape (n_samples, n_objectives)
+            Training targets. Shape (n, 1) for single-objective,
+            (n, m) for m objectives.
         bounds : np.ndarray, shape (2, n_features)
             Bounds for each input dimension. Row 0 contains lower bounds,
             row 1 contains upper bounds (BoTorch format).
-        objective : {"maximize", "minimize"}
-            Optimization direction.
+        maximize : list[bool]
+            Whether to maximize each objective. True = maximize, False = minimize.
 
         Returns
         -------
@@ -141,15 +156,21 @@ class BayesianRecommender(Recommender):
         Examples
         --------
         >>> X = np.array([[0.2, 0.3], [0.5, 0.7], [0.8, 0.1]])
-        >>> y = np.array([1.0, 2.0, 1.5])
+        >>> y = np.array([[1.0], [2.0], [1.5]])
         >>> bounds = np.array([[0.0, 0.0], [1.0, 1.0]])
-        >>> next_x = recommender.recommend_from_data(X, y, bounds, "maximize")
+        >>> next_x = recommender.recommend_from_data(X, y, bounds, [True])
         """
+        if X.dtype != np.float64:
+            raise ValueError(f"X must be float64, got {X.dtype}")
+        if y.dtype != np.float64:
+            raise ValueError(f"y must be float64, got {y.dtype}")
+
         if len(X) < self.project.recommender_config.n_initial:
+            self._surrogate = None
             return self.random_sample_from_bounds(bounds)
 
         self._fit_surrogate(X, y)
-        return self._optimize_acquisition(y, bounds, objective)
+        return self._optimize_acquisition(X, y, bounds, maximize)
 
     def _fit_surrogate(self, X: np.ndarray, y: np.ndarray) -> None:
         """Fit the GP surrogate model to training data.
@@ -166,8 +187,9 @@ class BayesianRecommender(Recommender):
         ----------
         X : np.ndarray, shape (n_samples, n_features)
             Training input features.
-        y : np.ndarray, shape (n_samples,)
-            Training target values.
+        y : np.ndarray, shape (n_samples, n_objectives)
+            Training target values. Shape (n, 1) for single-objective,
+            (n, m) for m objectives.
 
         Notes
         -----
@@ -181,20 +203,15 @@ class BayesianRecommender(Recommender):
         >>> recommender._fit_surrogate(X, y)
         >>> assert recommender._surrogate._is_fitted
         """
-        surrogate_type = self.project.recommender_config.surrogate
-        kwargs = self.project.recommender_config.surrogate_kwargs
-
-        if surrogate_type == "gp":
-            self._surrogate = SingleTaskGPSurrogate(**kwargs)
-        elif surrogate_type == "multitask_gp":
-            self._surrogate = MultiTaskGPSurrogate(**kwargs)
-        else:
-            raise ValueError(f"Unknown surrogate type: {surrogate_type}")
-
+        self._surrogate = self._build_surrogate()
         self._surrogate.fit(X, y)
 
     def _optimize_acquisition(
-        self, y: np.ndarray, bounds: np.ndarray, objective: str
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        bounds: np.ndarray,
+        maximize: list[bool],
     ) -> np.ndarray:
         """Optimize the acquisition function to find the next point.
 
@@ -203,13 +220,15 @@ class BayesianRecommender(Recommender):
 
         Parameters
         ----------
-        y : np.ndarray, shape (n_samples,)
-            Training target values, used to compute best_f for
-            improvement-based acquisition functions.
+        X : np.ndarray, shape (n_samples, n_features)
+            Training inputs, passed to acquisition builder for multi-objective.
+        y : np.ndarray, shape (n_samples, n_objectives)
+            Training target values. For single-objective, used to compute
+            best_f for improvement-based acquisition functions.
         bounds : np.ndarray, shape (2, n_features)
             Bounds for optimization. Row 0 = lower, row 1 = upper.
-        objective : {"maximize", "minimize"}
-            Optimization direction, used to determine best_f.
+        maximize : list[bool]
+            Whether to maximize each objective. True = maximize, False = minimize.
 
         Returns
         -------
@@ -219,8 +238,7 @@ class BayesianRecommender(Recommender):
         Notes
         -----
         This method assumes _fit_surrogate has already been called and
-        self._surrogate is a fitted GP model. The acquisition function
-        is built using _build_acquisition().
+        self._surrogate is a fitted GP model.
 
         The optimization uses L-BFGS-B with multiple random restarts
         to find a global optimum of the acquisition function.
@@ -228,18 +246,9 @@ class BayesianRecommender(Recommender):
         Examples
         --------
         >>> recommender._fit_surrogate(X, y)
-        >>> next_x = recommender._optimize_acquisition(y, bounds, "maximize")
+        >>> next_x = recommender._optimize_acquisition(X, y, bounds, [True])
         """
-        if objective == "maximize":
-            best_f = float(y.max())
-            maximize = True
-        elif objective == "minimize":
-            best_f = float(y.min())
-            maximize = False
-        else:
-            raise ValueError(f"Unknown objective: {objective}")
-
-        acq = self._build_acquisition(best_f, maximize)
+        acq = self._build_acquisition(X, y, maximize)
 
         bounds = torch.tensor(bounds, dtype=torch.float64)
 
@@ -249,119 +258,75 @@ class BayesianRecommender(Recommender):
 
         return candidates[0].detach().numpy()
 
-    def _build_acquisition(self, best_f: float, maximize: bool) -> AcquisitionFunction:
-        """Build a BoTorch acquisition function based on recommender config.
-
-        Creates and returns a ready-to-use BoTorch acquisition function
-        using self._surrogate and the project's recommender_config.acquisition
-        setting.
-
-        Parameters
-        ----------
-        best_f : float
-            Best observed target value so far.
-        maximize : bool
-            If True, seek higher values; if False, seek lower values.
-
-        Returns
-        -------
-        AcquisitionFunction
-            A BoTorch-compatible acquisition function ready for optimize_acqf.
-
-        Notes
-        -----
-        This method assumes _fit_surrogate has already been called and
-        self._surrogate is a fitted surrogate model.
-
-        Examples
-        --------
-        >>> recommender = BayesianRecommender(project)  # acquisition="ei"
-        >>> recommender._fit_surrogate(X, y)
-        >>> acq_fn = recommender._build_acquisition(best_f=1.0, maximize=True)
-        """
-        acq_type = self.project.recommender_config.acquisition
-        kwargs = self.project.recommender_config.acquisition_kwargs
-
-        if acq_type == "ei":
-            builder = ExpectedImprovement(**kwargs)
-        elif acq_type == "ucb":
-            builder = UpperConfidenceBound(**kwargs)
-        else:
-            raise ValueError(f"Unknown acquisition function: {acq_type}")
-
-        return builder.build(self._surrogate.model, best_f, maximize)
-
-    def _build_surrogate_for_project(self) -> Surrogate:
+    def _build_surrogate(self) -> Surrogate:
         """Build the appropriate surrogate model based on project configuration.
 
         Dispatches to SingleTaskGPSurrogate for single-objective optimization
-        or MultiTaskGPSurrogate/ModelListGP for multi-objective optimization,
-        based on project.target_config and project.recommender_config.
+        or MultiTaskGPSurrogate for multi-objective optimization, based on
+        project.is_multi_objective() and project.recommender_config.
 
         Returns
         -------
         Surrogate
             An unfitted surrogate model instance. For single-objective, returns
-            SingleTaskGPSurrogate. For multi-objective, returns MultiTaskGPSurrogate
-            or a BoTorch ModelListGP wrapper depending on recommender_config.surrogate.
+            SingleTaskGPSurrogate. For multi-objective, returns MultiTaskGPSurrogate.
 
         Notes
         -----
         The surrogate type is determined by:
         1. project.is_multi_objective() -> determines single vs multi-objective
-        2. recommender_config.surrogate -> "gp", "multitask_gp", or "model_list_gp"
+        2. recommender_config.surrogate -> "gp" or "multitask_gp"
 
         For multi-objective:
         - "multitask_gp": Uses ICM kernel to model correlations between objectives
-        - "model_list_gp": Independent GP per objective (no correlation modeling)
 
         Examples
         --------
         >>> # Single-objective project
-        >>> surrogate = recommender._build_surrogate_for_project()
+        >>> surrogate = recommender._build_surrogate()
         >>> isinstance(surrogate, SingleTaskGPSurrogate)  # True
 
         >>> # Multi-objective project with multitask GP
-        >>> surrogate = recommender._build_surrogate_for_project()
+        >>> surrogate = recommender._build_surrogate()
         >>> isinstance(surrogate, MultiTaskGPSurrogate)  # True
         """
-        # TODO: Implement the following logic:
-        # 1. Get surrogate_type from self.project.recommender_config.surrogate
-        # 2. Get surrogate_kwargs from self.project.recommender_config.surrogate_kwargs
-        # 3. If self.project.is_multi_objective():
-        #    a. If surrogate_type == "multitask_gp":
-        #       - Return MultiTaskGPSurrogate(**surrogate_kwargs)
-        #    b. If surrogate_type == "model_list_gp":
-        #       - Return ModelListGPSurrogate(**surrogate_kwargs)  # May need wrapper
-        #    c. Else: raise ValueError for unknown surrogate type
-        # 4. Else (single-objective):
-        #    a. If surrogate_type == "gp":
-        #       - Return SingleTaskGPSurrogate(**surrogate_kwargs)
-        #    b. Else: raise ValueError for unknown surrogate type
-        raise NotImplementedError
+        surrogate_type = self.project.recommender_config.surrogate
+        surrogate_kwargs = self.project.recommender_config.surrogate_kwargs
+        if self.project.is_multi_objective():
+            if surrogate_type == "multitask_gp":
+                return MultiTaskGPSurrogate(**surrogate_kwargs)
+            else:
+                raise ValueError(f"Unknown surrogate type: {surrogate_type}")
+        else:
+            if surrogate_type == "gp":
+                return SingleTaskGPSurrogate(**surrogate_kwargs)
+            else:
+                raise ValueError(f"Unknown surrogate type: {surrogate_type}")
 
-    def _build_acquisition_for_project(
-        self, X: np.ndarray, Y: np.ndarray
+    def _build_acquisition(
+        self, X: np.ndarray, y: np.ndarray, maximize: list[bool]
     ) -> AcquisitionFunction:
         """Build the appropriate acquisition function based on project configuration.
 
-        Dispatches to EI/UCB for single-objective or NEHVI/ParEGO for multi-objective
-        optimization, based on project.target_config and project.recommender_config.
+        Dispatches to EI/UCB for single-objective or NEHVI for multi-objective
+        optimization, based on project.is_multi_objective() and recommender_config.
 
         Parameters
         ----------
         X : np.ndarray, shape (n_samples, n_features), dtype float64
-            Training inputs, used by some multi-objective acquisitions (e.g., NEHVI)
+            Training inputs, used by multi-objective acquisitions (e.g., NEHVI)
             to compute the Pareto frontier.
-        Y : np.ndarray, shape (n_samples, n_targets), dtype float64
+        y : np.ndarray, shape (n_samples, n_objectives), dtype float64
             Training targets. For single-objective, shape is (n, 1). For
             multi-objective, shape is (n, m) where m = number of objectives.
+        maximize : list[bool]
+            Whether to maximize each objective. True = maximize, False = minimize.
 
         Returns
         -------
         AcquisitionFunction
             A BoTorch-compatible acquisition function ready for optimize_acqf.
-            For single-objective: EI or UCB. For multi-objective: NEHVI or ParEGO.
+            For single-objective: EI or UCB. For multi-objective: NEHVI.
 
         Notes
         -----
@@ -369,44 +334,46 @@ class BayesianRecommender(Recommender):
         is a fitted model.
 
         For single-objective:
-        - Computes best_f from Y (max or min depending on objective_mode)
-        - Builds EI or UCB using the existing _build_acquisition() method
+        - Computes best_f from y (max or min depending on maximize[0])
+        - Builds EI or UCB
 
         For multi-objective:
-        - Extracts reference_point from project.reference_point
-        - Extracts maximize flags from each target_config.objective_mode
-        - Converts X, Y to torch tensors
-        - Builds NEHVI or ParEGO with model, X_baseline, Y, ref_point, maximize
+        - Uses reference_point from project.reference_point
+        - Builds NEHVI with model, X_baseline, y, ref_point, maximize
 
         Examples
         --------
         >>> # Single-objective
-        >>> acqf = recommender._build_acquisition_for_project(X, Y)
-        >>> isinstance(acqf, _EIAcquisition)  # True (if acquisition="ei")
+        >>> acqf = recommender._build_acquisition(X, y, [True])
 
         >>> # Multi-objective
-        >>> acqf = recommender._build_acquisition_for_project(X, Y)
-        >>> isinstance(acqf, qLogNoisyExpectedHypervolumeImprovement)  # True
+        >>> acqf = recommender._build_acquisition(X, y, [True, False])
         """
-        # TODO: Implement the following logic:
-        # 1. Get acq_type from self.project.recommender_config.mo_acquisition (for MO)
-        #    or self.project.recommender_config.acquisition (for SO)
-        # 2. Get acq_kwargs from self.project.recommender_config.acquisition_kwargs
-        #
-        # 3. If self.project.is_multi_objective():
-        #    a. Get reference_point from self.project.reference_point
-        #    b. Get maximize flags: [cfg.objective_mode == "maximize"
-        #       for cfg in self.project.target_configs]
-        #    c. Convert X, Y to torch.float64 tensors
-        #    d. If acq_type == "nehvi":
-        #       - builder = NEHVI(**acq_kwargs)
-        #       - Return builder.build(model, X_baseline, Y, ref_point, maximize)
-        #    e. If acq_type == "parego":
-        #       - builder = ParEGO(**acq_kwargs)
-        #       - Return builder.build(model, X_baseline, Y, ref_point, maximize)
-        #    f. Else: raise ValueError for unknown acquisition type
-        #
-        # 4. Else (single-objective):
-        #    a. Determine best_f and maximize from Y and objective_mode
-        #    b. Use existing _build_acquisition(best_f, maximize) method
-        raise NotImplementedError
+        acq_kwargs = self.project.recommender_config.acquisition_kwargs
+        X = torch.from_numpy(X)
+        y = torch.from_numpy(y)
+
+        if self.project.is_multi_objective():
+            acq_type = self.project.recommender_config.mo_acquisition
+            ref_pt = self.project.reference_point
+            if acq_type == "nehvi":
+                builder = NEHVI(**acq_kwargs)
+                return builder.build(self._surrogate.model, X, y, ref_pt, maximize)
+            else:
+                raise ValueError(f"Unknown acquisition type: {acq_type}")
+        else:
+            acq_type = self.project.recommender_config.acquisition
+
+            if maximize[0]:
+                best_f = float(y.max())
+            else:
+                best_f = float(y.min())
+
+            if acq_type == "ei":
+                builder = ExpectedImprovement(**acq_kwargs)
+            elif acq_type == "ucb":
+                builder = UpperConfidenceBound(**acq_kwargs)
+            else:
+                raise ValueError(f"Unknown acquisition function: {acq_type}")
+
+            return builder.build(self._surrogate.model, best_f, maximize[0])

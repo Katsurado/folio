@@ -487,12 +487,22 @@ class Project:
                 if skip_obs:
                     continue
                 else:
-                    X_rows.append(obs.inputs)
+                    x_vals = [
+                        obs.inputs[inp.name]
+                        for inp in self.inputs
+                        if inp.type == "continuous"
+                    ]
+                    X_rows.append(x_vals)
                     y_rows.append(ys)
 
-        X = np.array(X_rows, dtype=np.float64)
-        y = np.array(y_rows, dtype=np.float64)
+        n_inputs = sum(1 for inp in self.inputs if inp.type == "continuous")
+        n_targets = len(targets)
 
-        assert y.shape[1] == len(targets)
+        if len(X_rows) == 0:
+            X = np.empty((0, n_inputs), dtype=np.float64)
+            y = np.empty((0, n_targets), dtype=np.float64)
+        else:
+            X = np.array(X_rows, dtype=np.float64)
+            y = np.array(y_rows, dtype=np.float64)
 
         return X, y

@@ -1,6 +1,6 @@
 """Random sampling recommender for baseline comparisons."""
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -46,7 +46,7 @@ class RandomRecommender(Recommender):
     ...         InputSpec("pressure", "continuous", bounds=(1.0, 10.0)),
     ...     ],
     ...     outputs=[OutputSpec("yield")],
-    ...     target_config=TargetConfig("yield"),
+    ...     target_configs=[TargetConfig("yield")],
     ... )
     >>> recommender = RandomRecommender(project)
     >>> next_inputs = recommender.recommend([])
@@ -76,7 +76,7 @@ class RandomRecommender(Recommender):
         X: np.ndarray,
         y: np.ndarray,
         bounds: np.ndarray,
-        objective: Literal["maximize", "minimize"],
+        maximize: list[bool],
     ) -> np.ndarray:
         """Sample uniformly at random within bounds, ignoring X and y.
 
@@ -84,13 +84,13 @@ class RandomRecommender(Recommender):
         ----------
         X : np.ndarray, shape (n_samples, n_features)
             Training inputs. Ignored by RandomRecommender.
-        y : np.ndarray, shape (n_samples,)
+        y : np.ndarray, shape (n_samples, n_objectives)
             Training targets. Ignored by RandomRecommender.
         bounds : np.ndarray, shape (2, n_features)
             Bounds for each input dimension. Row 0 contains lower bounds,
             row 1 contains upper bounds (BoTorch format).
-        objective : {"maximize", "minimize"}
-            Optimization direction. Ignored by RandomRecommender.
+        maximize : list[bool]
+            Whether to maximize each objective. Ignored by RandomRecommender.
 
         Returns
         -------
@@ -102,9 +102,9 @@ class RandomRecommender(Recommender):
         >>> bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
         >>> x = recommender.recommend_from_data(
         ...     X=np.empty((0, 2)),
-        ...     y=np.empty(0),
+        ...     y=np.empty((0, 1)),
         ...     bounds=bounds,
-        ...     objective="maximize",
+        ...     maximize=[True],
         ... )
         >>> x.shape
         (2,)

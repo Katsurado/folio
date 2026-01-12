@@ -22,7 +22,7 @@ class ConcreteRecommender(Recommender):
         self.last_X = None
         self.last_y = None
         self.last_bounds = None
-        self.last_objective = None
+        self.last_maximize = None
         self.call_count = 0
 
     def recommend_from_data(
@@ -30,7 +30,7 @@ class ConcreteRecommender(Recommender):
         X: np.ndarray,
         y: np.ndarray,
         bounds: np.ndarray,
-        objective: str,
+        maximize: list[bool],
     ) -> np.ndarray:
         """Record arguments and return midpoint of bounds.
 
@@ -40,7 +40,7 @@ class ConcreteRecommender(Recommender):
         self.last_X = X
         self.last_y = y
         self.last_bounds = bounds
-        self.last_objective = objective
+        self.last_maximize = maximize
         self.call_count += 1
 
         # Return midpoint of each dimension
@@ -223,7 +223,7 @@ class TestRecommendMethod:
         recommender = ConcreteRecommender(simple_project)
         recommender.recommend(sample_observations)
 
-        expected_y = np.array([5.0, 12.0, 8.0])
+        expected_y = np.array([[5.0], [12.0], [8.0]])
         np.testing.assert_array_equal(recommender.last_y, expected_y)
 
     def test_recommend_extracts_bounds_correctly(
@@ -245,16 +245,16 @@ class TestRecommendMethod:
         )
         np.testing.assert_array_equal(recommender.last_bounds, expected_bounds)
 
-    def test_recommend_passes_objective_correctly(
+    def test_recommend_passes_maximize_correctly(
         self, simple_project, sample_observations
     ):
-        """recommend() passes objective from target config."""
+        """recommend() passes maximize list from target config."""
         recommender = ConcreteRecommender(simple_project)
         recommender.recommend(sample_observations)
-        assert recommender.last_objective == "maximize"
+        assert recommender.last_maximize == [True]
 
-    def test_recommend_passes_minimize_objective(self, sample_observations):
-        """recommend() passes 'minimize' objective when configured."""
+    def test_recommend_passes_minimize(self, sample_observations):
+        """recommend() passes [False] for minimize objective."""
         project = Project(
             id=1,
             name="minimize_project",
@@ -267,7 +267,7 @@ class TestRecommendMethod:
         )
         recommender = ConcreteRecommender(project)
         recommender.recommend(sample_observations)
-        assert recommender.last_objective == "minimize"
+        assert recommender.last_maximize == [False]
 
     def test_recommend_converts_array_to_dict(
         self, simple_project, sample_observations
@@ -293,19 +293,18 @@ class TestRecommendWithEmptyObservations:
         assert set(result.keys()) == {"x1", "x2"}
 
     def test_empty_observations_passes_empty_X(self, simple_project):
-        """Empty observations results in empty X array."""
+        """Empty observations results in empty X array with proper shape."""
         recommender = ConcreteRecommender(simple_project)
         recommender.recommend([])
 
-        # np.array([]) produces shape (0,) not (0, n_features)
-        assert recommender.last_X.shape == (0,)
+        assert recommender.last_X.shape == (0, 2)
 
     def test_empty_observations_passes_empty_y(self, simple_project):
-        """Empty observations results in empty y array."""
+        """Empty observations results in empty y array with proper shape."""
         recommender = ConcreteRecommender(simple_project)
         recommender.recommend([])
 
-        assert recommender.last_y.shape == (0,)
+        assert recommender.last_y.shape == (0, 1)
 
 
 class TestRecommendWithFailedObservations:
@@ -367,7 +366,7 @@ class TestRecommendWithFailedObservations:
         recommender = ConcreteRecommender(simple_project)
         recommender.recommend(observations)
 
-        expected_y = np.array([5.0, 8.0])
+        expected_y = np.array([[5.0], [8.0]])
         np.testing.assert_array_equal(recommender.last_y, expected_y)
 
 

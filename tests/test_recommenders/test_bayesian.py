@@ -191,7 +191,7 @@ class TestBayesianRecommenderRecommendFromData:
         y = np.array([[10.0], [7.0], [15.0], [5.0]])
         # Bounds shape (2, d): row 0 = lower, row 1 = upper
         bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
-        result = recommender.recommend_from_data(X, y, bounds, "maximize")
+        result = recommender.recommend_from_data(X, y, bounds, [True])
         assert isinstance(result, np.ndarray)
 
     def test_recommend_from_data_correct_shape(self, simple_project):
@@ -201,7 +201,7 @@ class TestBayesianRecommenderRecommendFromData:
         X = np.array([[5.0, 0.0], [2.0, -3.0], [8.0, 2.0], [1.0, -1.0]])
         y = np.array([[10.0], [7.0], [15.0], [5.0]])
         bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
-        result = recommender.recommend_from_data(X, y, bounds, "maximize")
+        result = recommender.recommend_from_data(X, y, bounds, [True])
         assert result.shape == (2,)
 
     def test_recommend_from_data_within_bounds(self, simple_project):
@@ -211,7 +211,7 @@ class TestBayesianRecommenderRecommendFromData:
         X = np.array([[5.0, 0.0], [2.0, -3.0], [8.0, 2.0], [1.0, -1.0]])
         y = np.array([[10.0], [7.0], [15.0], [5.0]])
         bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
-        result = recommender.recommend_from_data(X, y, bounds, "maximize")
+        result = recommender.recommend_from_data(X, y, bounds, [True])
         assert np.all((bounds[0, :] <= result) & (result <= bounds[1, :]))
 
     def test_recommend_from_data_empty_X_returns_random(self, simple_project):
@@ -219,7 +219,7 @@ class TestBayesianRecommenderRecommendFromData:
         recommender = BayesianRecommender(simple_project)
         bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
         result = recommender.recommend_from_data(
-            X=np.empty((0, 2)), y=np.empty(0), bounds=bounds, objective="maximize"
+            X=np.empty((0, 2)), y=np.empty((0, 1)), bounds=bounds, maximize=[True]
         )
         assert result.shape == (2,)
         assert np.all((bounds[0, :] <= result) & (result <= bounds[1, :]))
@@ -231,7 +231,7 @@ class TestBayesianRecommenderRecommendFromData:
         X = np.array([[5.0, 0.0], [2.0, -3.0]])
         y = np.array([[10.0], [7.0]])
         bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
-        result = recommender.recommend_from_data(X, y, bounds, "maximize")
+        result = recommender.recommend_from_data(X, y, bounds, [True])
         assert result.shape == (2,)
         assert np.all((bounds[0, :] <= result) & (result <= bounds[1, :]))
 
@@ -243,7 +243,7 @@ class TestBayesianRecommenderRecommendFromData:
         X = np.array([[1.0, 0.0], [5.0, 0.0], [9.0, 0.0]])
         y = np.array([[1.0], [5.0], [9.0]])
         bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
-        result = recommender.recommend_from_data(X, y, bounds, "maximize")
+        result = recommender.recommend_from_data(X, y, bounds, [True])
         assert np.all((bounds[0, :] <= result) & (result <= bounds[1, :]))
 
     def test_recommend_from_data_minimize(self, minimize_project):
@@ -254,7 +254,7 @@ class TestBayesianRecommenderRecommendFromData:
         X = np.array([[1.0, 0.0], [5.0, 0.0], [9.0, 0.0]])
         y = np.array([[1.0], [5.0], [9.0]])
         bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
-        result = recommender.recommend_from_data(X, y, bounds, "minimize")
+        result = recommender.recommend_from_data(X, y, bounds, [False])
         assert np.all((bounds[0, :] <= result) & (result <= bounds[1, :]))
 
     def test_recommend_from_data_single_dimension(self, single_input_project):
@@ -265,7 +265,7 @@ class TestBayesianRecommenderRecommendFromData:
         y = np.array([[0.2], [0.8], [0.4]])
         # Shape (2, 1) for single dimension
         bounds = np.array([[0.0], [1.0]])
-        result = recommender.recommend_from_data(X, y, bounds, "maximize")
+        result = recommender.recommend_from_data(X, y, bounds, [True])
         assert result.shape == (1,)
         assert 0.0 <= result[0] <= 1.0
 
@@ -609,7 +609,7 @@ class TestBayesianRecommenderInternalMethods:
         recommender = BayesianRecommender(simple_project)
         X, y = simple_project.get_training_data(enough_observations)
         recommender._fit_surrogate(X, y)
-        acq_fn = recommender._build_acquisition(best_f=float(y.max()), maximize=True)
+        acq_fn = recommender._build_acquisition(X, y, [True])
         assert isinstance(acq_fn, AcquisitionFunction)
 
     def test_build_acquisition_ucb(self, ucb_project, enough_observations):
@@ -620,7 +620,7 @@ class TestBayesianRecommenderInternalMethods:
         recommender = BayesianRecommender(ucb_project)
         X, y = ucb_project.get_training_data(enough_observations)
         recommender._fit_surrogate(X, y)
-        acq_fn = recommender._build_acquisition(best_f=float(y.max()), maximize=True)
+        acq_fn = recommender._build_acquisition(X, y, [True])
         assert isinstance(acq_fn, AcquisitionFunction)
 
 
@@ -647,7 +647,7 @@ class TestBayesianRecommenderKwargsPassthrough:
         X = np.array([[0.2], [0.5], [0.8]])
         y = np.array([[0.2], [0.8], [0.4]])
         recommender._fit_surrogate(X, y)
-        acq_fn = recommender._build_acquisition(best_f=0.8, maximize=True)
+        acq_fn = recommender._build_acquisition(X, y, [True])
         assert isinstance(acq_fn, AcquisitionFunction)
 
     def test_beta_passed_to_ucb(self):
@@ -670,7 +670,7 @@ class TestBayesianRecommenderKwargsPassthrough:
         X = np.array([[0.2], [0.5], [0.8]])
         y = np.array([[0.2], [0.8], [0.4]])
         recommender._fit_surrogate(X, y)
-        acq_fn = recommender._build_acquisition(best_f=0.8, maximize=True)
+        acq_fn = recommender._build_acquisition(X, y, [True])
         assert isinstance(acq_fn, AcquisitionFunction)
 
     def test_default_xi_when_not_specified(self):
@@ -690,7 +690,7 @@ class TestBayesianRecommenderKwargsPassthrough:
         X = np.array([[0.2], [0.5], [0.8]])
         y = np.array([[0.2], [0.8], [0.4]])
         recommender._fit_surrogate(X, y)
-        acq_fn = recommender._build_acquisition(best_f=0.8, maximize=True)
+        acq_fn = recommender._build_acquisition(X, y, [True])
         assert isinstance(acq_fn, AcquisitionFunction)
 
     def test_default_beta_when_not_specified(self):
@@ -710,7 +710,7 @@ class TestBayesianRecommenderKwargsPassthrough:
         X = np.array([[0.2], [0.5], [0.8]])
         y = np.array([[0.2], [0.8], [0.4]])
         recommender._fit_surrogate(X, y)
-        acq_fn = recommender._build_acquisition(best_f=0.8, maximize=True)
+        acq_fn = recommender._build_acquisition(X, y, [True])
         assert isinstance(acq_fn, AcquisitionFunction)
 
 

@@ -19,7 +19,7 @@ class Recommender(ABC):
 
     The interface has two levels:
     - High-level: `recommend(observations)` works with Project and Observation objects
-    - Low-level: `recommend_from_data(X, y, bounds, objective)` works with numpy arrays
+    - Low-level: `recommend_from_data(X, Y, bounds, objectives)` works with numpy arrays
 
     The high-level method extracts data from Project/Observations and delegates to
     the low-level method, which implements the actual recommendation logic.
@@ -54,7 +54,7 @@ class Recommender(ABC):
     ...         X: np.ndarray,
     ...         y: np.ndarray,
     ...         bounds: np.ndarray,
-    ...         objective: Literal["maximize", "minimize"],
+    ...         maximize: list[bool],
     ...     ) -> np.ndarray:
     ...         # Custom logic to suggest next experiment
     ...         return np.array([0.5, 0.5])
@@ -69,9 +69,9 @@ class Recommender(ABC):
     Using the low-level interface directly:
 
     >>> X = np.array([[0.2, 0.3], [0.5, 0.7]])
-    >>> y = np.array([1.0, 2.0])
+    >>> y = np.array([[1.0], [2.0]])  # shape (n, m) for m objectives
     >>> bounds = np.array([[0.0, 1.0], [0.0, 1.0]])
-    >>> next_x = recommender.recommend_from_data(X, y, bounds, "maximize")
+    >>> next_x = recommender.recommend_from_data(X, y, bounds, [True])
     """
 
     def __init__(self, project: "Project") -> None:
@@ -124,8 +124,10 @@ class Recommender(ABC):
         """
         X, y = self.project.get_training_data(observations)
         bounds = self.project.get_optimization_bounds()
-        objective = self.project.target_configs[0].objective_mode
-        candidate = self.recommend_from_data(X, y, bounds, objective)
+        maximize = [
+            cfg.objective_mode == "maximize" for cfg in self.project.target_configs
+        ]
+        candidate = self.recommend_from_data(X, y, bounds, maximize)
         names = [inp.name for inp in self.project.inputs if inp.type == "continuous"]
 
         next_input = {names[i]: float(candidate[i]) for i in range(len(names))}
@@ -164,7 +166,7 @@ class Recommender(ABC):
         X: np.ndarray,
         y: np.ndarray,
         bounds: np.ndarray,
-        objective: str,
+        maximize: list[bool],
     ) -> np.ndarray:
         """Suggest next experiment inputs from raw numpy arrays.
 
@@ -178,16 +180,17 @@ class Recommender(ABC):
             Training input features from previous experiments. Each row is
             an observation, each column is an input dimension. May be empty
             (shape (0, n_features)) for the first recommendation.
-        y : np.ndarray, shape (n_samples,)
-            Training target values corresponding to X. Computed from outputs
-            using the project's target configuration (e.g., direct output,
-            ratio, difference). May be empty for the first recommendation.
+        y : np.ndarray, shape (n_samples, n_objectives)
+            Training target values corresponding to X. Each column is one
+            objective. For single-objective, shape is (n, 1). Computed from
+            outputs using the project's target configurations. May be empty
+            for the first recommendation.
         bounds : np.ndarray, shape (2, n_features)
             Bounds for each input dimension. Row 0 contains lower bounds,
             row 1 contains upper bounds (BoTorch format).
-        objective : {"maximize", "minimize"}
-            Optimization direction. "maximize" seeks higher target values,
-            "minimize" seeks lower values.
+        maximize : list[bool]
+            Whether to maximize each objective. True = maximize, False = minimize.
+            Length must match y.shape[1].
 
         Returns
         -------
@@ -200,17 +203,19 @@ class Recommender(ABC):
         -----
         - When X is empty, implementations typically return a random sample
         - All returned values must satisfy: bounds[i, 0] <= result[i] <= bounds[i, 1]
-        - The objective parameter determines whether to seek maxima or minima
+        - For single-objective, maximize has one element and y has shape (n, 1)
+        - For multi-objective, maximize has m elements and y has shape (n, m)
 
         Examples
         --------
+        >>> # Single-objective
         >>> X = np.array([[0.2, 0.3], [0.5, 0.7], [0.8, 0.1]])
-        >>> y = np.array([1.0, 2.0, 1.5])
-        >>> bounds = np.array([[0.0, 1.0], [0.0, 1.0]])
-        >>> next_x = recommender.recommend_from_data(X, y, bounds, "maximize")
-        >>> next_x.shape
-        (2,)
-        >>> np.all((bounds[:, 0] <= next_x) & (next_x <= bounds[:, 1]))
-        True
+        >>> y = np.array([[1.0], [2.0], [1.5]])
+        >>> bounds = np.array([[0.0, 0.0], [1.0, 1.0]])
+        >>> next_x = recommender.recommend_from_data(X, y, bounds, [True])
+
+        >>> # Multi-objective
+        >>> y = np.array([[1.0, 0.5], [2.0, 0.3], [1.5, 0.8]])  # 2 objectives
+        >>> next_x = recommender.recommend_from_data(X, y, bounds, [True, False])
         """
         ...
