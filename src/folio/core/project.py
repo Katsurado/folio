@@ -29,8 +29,9 @@ class Project:
     new experiments. Projects are persisted to the database and can be retrieved
     by name.
 
-    Supports both single-objective and multi-objective optimization. For multi-objective,
-    provide multiple TargetConfig entries in target_configs and a reference_point.
+    Supports both single-objective and multi-objective optimization. For
+    multi-objective, provide multiple TargetConfig entries in target_configs
+    and a reference_point.
 
     Parameters
     ----------
@@ -306,7 +307,7 @@ class Project:
         """
         return [out.name for out in self.outputs]
 
-    def get_bounds(self) -> list[tuple[float, float]]:
+    def get_bounds(self) -> list[tuple[float, float] | None]:
         """Return bounds for continuous inputs in definition order.
 
         Categorical inputs are excluded since they don't have numeric bounds.
@@ -422,11 +423,7 @@ class Project:
         >>> targets = project.get_targets()
         >>> len(targets)  # 2
         """
-        # TODO: Implement the following logic:
-        # 1. For each config in self.target_configs:
-        #    - Call self.get_target(config)
-        # 2. Return list of target instances
-        raise NotImplementedError
+        return [self.get_target(cf) for cf in self.target_configs]
 
     def get_training_data(
         self, observations: list["Observation"]
@@ -471,16 +468,31 @@ class Project:
         >>> X.shape  # (n, d)
         >>> Y.shape  # (n, 2)
         """
-        # TODO: Implement the following logic:
-        # 1. targets = self.get_targets()  # List of Target objects
-        # 2. input_names = [inp.name for inp in self.inputs]
-        # 3. Initialize X_rows = [], Y_rows = []
-        # 4. For each observation in observations:
-        #    a. Skip if obs.failed
-        #    b. Compute target value for EACH target in targets
-        #    c. If ANY target returns None, skip this observation
-        #    d. Otherwise, append input row to X_rows and target values to Y_rows
-        # 5. Return (np.array(X_rows, dtype=float64), np.array(Y_rows, dtype=float64))
-        #
-        # Note: Y should always be 2D with shape (n, m) where m = len(targets)
-        raise NotImplementedError
+        targets = self.get_targets()
+        y_rows = []
+        X_rows = []
+
+        for obs in observations:
+            if not obs.failed:
+                ys = []
+                skip_obs = False
+
+                for tgt in targets:
+                    tgt_val = tgt.compute(obs)
+                    if tgt_val is None:
+                        skip_obs = True
+                        break
+                    ys.append(tgt_val)
+
+                if skip_obs:
+                    continue
+                else:
+                    X_rows.append(obs.inputs)
+                    y_rows.append(ys)
+
+        X = np.array(X_rows, dtype=np.float64)
+        y = np.array(y_rows, dtype=np.float64)
+
+        assert y.shape[1] == len(targets)
+
+        return X, y
