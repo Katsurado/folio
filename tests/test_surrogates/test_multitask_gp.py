@@ -6,12 +6,12 @@ import torch
 from botorch.fit import fit_gpytorch_mll
 from botorch.models import MultiTaskGP
 from botorch.models.transforms.input import Normalize
-from botorch.models.transforms.outcome import Standardize
 from gpytorch.kernels import MaternKernel, ScaleKernel
 from gpytorch.mlls import ExactMarginalLogLikelihood
 
 from folio.exceptions import NotFittedError
 from folio.surrogates.multitask_gp import MultiTaskGPSurrogate
+from folio.surrogates.transforms import TaskStandardize
 
 
 @pytest.fixture
@@ -647,7 +647,9 @@ def _fit_reference_botorch_multitask_gp(
         input_transform = Normalize(d=d + 1, indices=list(range(d)))
     else:
         input_transform = None
-    outcome_transform = Standardize(m=1) if normalize_outputs else None
+    outcome_transform = (
+        TaskStandardize(num_tasks=n_tasks) if normalize_outputs else None
+    )
 
     # Use same kernel as MultiTaskGPSurrogate (Matern 2.5 with ARD)
     base_kernel = MaternKernel(nu=2.5, ard_num_dims=d)
@@ -681,7 +683,7 @@ def _predict_reference_botorch_multitask_gp(
     X : np.ndarray, shape (n, d)
         Test points.
     n_tasks : int
-        Number of tasks.
+        Number of tasks (unused, kept for API compatibility).
 
     Returns
     -------
@@ -690,23 +692,13 @@ def _predict_reference_botorch_multitask_gp(
     std : np.ndarray, shape (n, n_tasks)
         Predicted standard deviations.
     """
-    n = X.shape[0]
-    mean_list = []
-    std_list = []
+    X_torch = torch.tensor(X, dtype=torch.float64)
 
     model.eval()
     with torch.no_grad():
-        for task_idx in range(n_tasks):
-            task_indices = np.full((n, 1), task_idx, dtype=np.float64)
-            X_with_task = np.hstack([X, task_indices])
-            X_torch = torch.tensor(X_with_task, dtype=torch.float64)
-
-            posterior = model.posterior(X_torch)
-            mean_list.append(posterior.mean.squeeze(-1).numpy())
-            std_list.append(posterior.variance.squeeze(-1).sqrt().numpy())
-
-    mean = np.column_stack(mean_list)
-    std = np.column_stack(std_list)
+        posterior = model.posterior(X_torch)
+        mean = posterior.mean.numpy()
+        std = posterior.variance.sqrt().numpy()
 
     return mean, std
 

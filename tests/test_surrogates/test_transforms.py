@@ -92,7 +92,8 @@ class TestTaskStandardizeForward:
         transform = TaskStandardize(num_tasks=2)
         y_transformed, y_var = transform.forward(y, X)
         assert y_transformed.shape == y.shape
-        assert y_var.shape == y.shape
+        # Yvar is None when no input Yvar is provided (matches BoTorch Standardize)
+        assert y_var is None
 
     def test_forward_computes_correct_means(self, simple_data):
         """forward() computes correct per-task means."""

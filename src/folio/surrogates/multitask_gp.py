@@ -7,12 +7,12 @@ import torch
 from botorch.fit import fit_gpytorch_mll
 from botorch.models import MultiTaskGP
 from botorch.models.transforms.input import Normalize
-from botorch.models.transforms.outcome import Standardize
 from gpytorch.kernels import MaternKernel, RBFKernel, ScaleKernel
 from gpytorch.mlls import ExactMarginalLogLikelihood
 
 from folio.exceptions import NotFittedError
 from folio.surrogates.base import Surrogate
+from folio.surrogates.transforms import TaskStandardize
 
 
 class MultiTaskGPSurrogate(Surrogate):
@@ -235,7 +235,7 @@ class MultiTaskGPSurrogate(Surrogate):
             input_transform = None
 
         if self.normalize_outputs:
-            output_transform = Standardize(m=1)
+            output_transform = TaskStandardize(num_tasks=self.n_tasks)
         else:
             output_transform = None
 

@@ -100,44 +100,48 @@ class TaskStandardize(OutcomeTransform):
         self._is_trained: bool = False
         self.eps = 10e-9
 
-    def forward(self, y: Tensor, X: Tensor | None = None) -> tuple[Tensor, Tensor]:
-        """Transform y by standardizing per task.
+    def forward(
+        self, Y: Tensor, X: Tensor | None = None, Yvar: Tensor | None = None
+    ) -> tuple[Tensor, Tensor | None]:
+        """Transform Y by standardizing per task.
 
-        On the first call, computes and stores per-task mean and std from y.
+        On the first call, computes and stores per-task mean and std from Y.
         On subsequent calls, uses the stored statistics (frozen).
 
         Parameters
         ----------
-        y : Tensor, shape (n, 1)
+        Y : Tensor, shape (n, 1)
             Outcome values to transform. In MultiTaskGP format, this is a
             column vector with all observations stacked.
         X : Tensor, shape (n, d) or None
             Input features including task column. Required to identify which
             task each observation belongs to.
+        Yvar : Tensor or None
+            Observation noise variance. If provided, will be scaled by per-task
+            variance.
 
         Returns
         -------
-        y_transformed : Tensor, shape (n, 1)
+        Y_transformed : Tensor, shape (n, 1)
             Standardized outcome values.
-        y_var : Tensor, shape (n, 1)
-            Per-observation variance scaling (std^2 for each row's task).
-            Used by BoTorch for noise modeling.
+        Yvar_transformed : Tensor or None
+            Scaled observation variance if Yvar was provided, None otherwise.
 
         Raises
         ------
         ValueError
             If X is None (task IDs required for per-task standardization).
         ValueError
-            If y and X have different number of rows.
+            If Y and X have different number of rows.
         ValueError
             If task IDs in X are out of range [0, num_tasks).
         """
         if X is None:
             raise ValueError("Need task IDs for per-task standardization")
-        if X.shape[0] != y.shape[0]:
+        if X.shape[0] != Y.shape[0]:
             raise ValueError(
                 f"Different number of observations: {X.shape[0]} "
-                f"and labels: {y.shape[0]}"
+                f"and labels: {Y.shape[0]}"
             )
 
         task_ind = X[:, self.task_feature].long()
@@ -149,45 +153,53 @@ class TaskStandardize(OutcomeTransform):
             )
 
         if not self._is_trained:
-            self._means = torch.zeros(self.num_tasks, dtype=y.dtype)
-            self._stds = torch.zeros(self.num_tasks, dtype=y.dtype)
+            self._means = torch.zeros(self.num_tasks, dtype=Y.dtype)
+            self._stds = torch.zeros(self.num_tasks, dtype=Y.dtype)
 
             for t in range(self.num_tasks):
                 mask = task_ind == t
-                y_task = y[mask]
-                self._means[t] = y_task.mean()
+                Y_task = Y[mask]
+                self._means[t] = Y_task.mean()
                 # Default to std=1.0 when only 1 sample (avoids division by zero in std)
-                if y_task.numel() <= 1:
+                if Y_task.numel() <= 1:
                     self._stds[t] = 1.0
                 else:
-                    self._stds[t] = y_task.std()
+                    self._stds[t] = Y_task.std()
 
             self._is_trained = True
 
         mean = self._means[task_ind].unsqueeze(-1)
         std = self._stds[task_ind].unsqueeze(-1)
 
-        transformed = (y - mean) / (std + self.eps)
-        var = std.square()
+        transformed = (Y - mean) / (std + self.eps)
 
-        return transformed, var
+        # Only transform Yvar if it was provided (matches BoTorch Standardize behavior)
+        if Yvar is not None:
+            Yvar_transformed = Yvar / (std.square() + self.eps)
+            return transformed, Yvar_transformed
 
-    def untransform(self, y: Tensor, X: Tensor | None = None) -> tuple[Tensor, Tensor]:
+        return transformed, None
+
+    def untransform(
+        self, Y: Tensor, X: Tensor | None = None, Yvar: Tensor | None = None
+    ) -> tuple[Tensor, Tensor]:
         """Reverse the per-task standardization.
 
         Parameters
         ----------
-        y : Tensor, shape (n, 1)
+        Y : Tensor, shape (n, 1)
             Transformed outcome values to convert back to original scale.
         X : Tensor, shape (n, d) or None
             Input features including task column. Required to identify which
             task each observation belongs to.
+        Yvar : Tensor or None
+            Observation noise variance (unused, for API compatibility).
 
         Returns
         -------
-        y_original : Tensor, shape (n, 1)
+        Y_original : Tensor, shape (n, 1)
             Outcome values in original scale.
-        y_var : Tensor, shape (n, 1)
+        Yvar_original : Tensor, shape (n, 1)
             Per-observation variance scaling.
 
         Raises
@@ -206,24 +218,38 @@ class TaskStandardize(OutcomeTransform):
         mean = self._means[task_ind].unsqueeze(-1)
         std = self._stds[task_ind].unsqueeze(-1)
 
-        untransformed = (y * (std + self.eps)) + mean
+        untransformed = (Y * (std + self.eps)) + mean
         var = std.square()
 
         return untransformed, var
 
     def _sample_transform(self, sample):
-        """s_original = µ_task + σ_task * s_standardized"""
+        """s_original = µ_task + σ_task * s_standardized.
+
+        Per-task stats have shape (num_tasks,) which broadcasts correctly
+        against posterior shapes (..., num_tasks).
+        """
         return self._means + self._stds * sample
 
     def _mean_transform(self, m, v):
-        """µ_original = µ_task + σ_task * µ_standardized"""
+        """µ_original = µ_task + σ_task * µ_standardized.
+
+        Per-task stats have shape (num_tasks,) which broadcasts correctly
+        against posterior mean shape (..., num_tasks).
+        """
         return self._means + self._stds * m
 
     def _var_transform(self, m, v):
-        """σ_original = σ_task^2 * σ_std^2"""
+        """σ_original = σ_task^2 * σ_std^2.
+
+        Per-task stats have shape (num_tasks,) which broadcasts correctly
+        against posterior variance shape (..., num_tasks).
+        """
         return self._stds.square() * v
 
-    def untransform_posterior(self, posterior: Posterior) -> Posterior:
+    def untransform_posterior(
+        self, posterior: Posterior, X: Tensor | None = None
+    ) -> Posterior:
         """Untransform a posterior distribution.
 
         This is required by BoTorch for acquisition function evaluation.
@@ -235,6 +261,8 @@ class TaskStandardize(OutcomeTransform):
         posterior : Posterior
             A BoTorch posterior object with mean and variance in transformed
             (standardized) space.
+        X : Tensor or None
+            Input features (unused, for API compatibility).
 
         Returns
         -------
