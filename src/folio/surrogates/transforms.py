@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import torch
 from botorch.models.transforms.outcome import OutcomeTransform
-from botorch.posteriors import Posterior
+from botorch.posteriors import Posterior, TransformedPosterior
 from torch import Tensor
 
 
@@ -98,6 +98,7 @@ class TaskStandardize(OutcomeTransform):
         self._means: Tensor | None = None
         self._stds: Tensor | None = None
         self._is_trained: bool = False
+        self.eps = 10e-9
 
     def forward(self, y: Tensor, X: Tensor | None = None) -> tuple[Tensor, Tensor]:
         """Transform y by standardizing per task.
@@ -158,12 +159,10 @@ class TaskStandardize(OutcomeTransform):
 
             self._is_trained = True
 
-        eps = 10e-9
-
         mean = self._means[task_ind].unsqueeze(-1)
         std = self._stds[task_ind].unsqueeze(-1)
 
-        transformed = (y - mean) / (std + eps)
+        transformed = (y - mean) / (std + self.eps)
         var = std.square()
 
         return transformed, var
@@ -193,8 +192,31 @@ class TaskStandardize(OutcomeTransform):
         ValueError
             If transform has not been trained (forward() not called yet).
         """
+        if X is None:
+            raise ValueError("Need task IDs for per-task standardization")
+        if not self._is_trained:
+            raise ValueError("Need to call forward() before calling untransform()")
+
         task_ind = X[:, self.task_feature].long()
-        raise NotImplementedError
+        mean = self._means[task_ind].unsqueeze(-1)
+        std = self._stds[task_ind].unsqueeze(-1)
+
+        untransformed = (y * (std + self.eps)) + mean
+        var = std.square()
+
+        return untransformed, var
+
+    def _sample_transform(self, sample):
+        """s_original = µ_task + σ_task * s_standardized"""
+        return self._means + self._stds * sample
+
+    def _mean_transform(self, m, v):
+        """µ_original = µ_task + σ_task * µ_standardized"""
+        return self._means + self._stds * m
+
+    def _var_transform(self, m, v):
+        """σ_original = σ_task^2 * σ_std^2"""
+        return self._stds.square() * v
 
     def untransform_posterior(self, posterior: Posterior) -> Posterior:
         """Untransform a posterior distribution.
@@ -216,8 +238,6 @@ class TaskStandardize(OutcomeTransform):
 
         Raises
         ------
-        NotImplementedError
-            If the posterior type is not supported.
         ValueError
             If transform has not been trained.
 
@@ -230,4 +250,16 @@ class TaskStandardize(OutcomeTransform):
         This method handles the complexity of mapping task-specific statistics
         to the batch/q-batch dimensions of the posterior.
         """
-        raise NotImplementedError
+        if not self._is_trained:
+            raise ValueError(
+                "Need to call forward() before calling untransform_posterior()"
+            )
+
+        orginial = TransformedPosterior(
+            posterior=posterior,
+            sample_transform=self._sample_transform,
+            mean_transform=self._mean_transform,
+            variance_transform=self._var_transform,
+        )
+
+        return orginial
