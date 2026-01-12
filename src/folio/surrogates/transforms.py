@@ -154,8 +154,13 @@ class TaskStandardize(OutcomeTransform):
 
             for t in range(self.num_tasks):
                 mask = task_ind == t
-                self._means[t] = y[mask].mean()
-                self._stds[t] = y[mask].std()
+                y_task = y[mask]
+                self._means[t] = y_task.mean()
+                # Default to std=1.0 when only 1 sample (avoids division by zero in std)
+                if y_task.numel() <= 1:
+                    self._stds[t] = 1.0
+                else:
+                    self._stds[t] = y_task.std()
 
             self._is_trained = True
 

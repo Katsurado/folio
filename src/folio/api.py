@@ -1,16 +1,15 @@
 """High-level API for Folio electronic lab notebook."""
 
 import logging
-import datetime
 from pathlib import Path
 
+from folio.core import database
 from folio.core.config import RecommenderConfig, TargetConfig
 from folio.core.database import DEFAULT_DB_PATH
 from folio.core.observation import Observation
 from folio.core.project import Project
 from folio.core.schema import InputSpec, OutputSpec
-from folio.recommenders.base import Recommender
-from folio.core import database
+from folio.recommenders import BayesianRecommender, RandomRecommender, Recommender
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +69,7 @@ class Folio:
         """
         self.db_path = Path(db_path) if isinstance(db_path, str) else db_path
         self._recommenders: dict[str, Recommender] = {}
+        database.init_db(self.db_path)
 
     def create_project(
         self,
@@ -133,37 +133,20 @@ class Folio:
         ...     reference_point=[0.0, 0.0],
         ... )
         """
-        raise NotImplementedError
+        if recommender_config is None:
+            recommender_config = RecommenderConfig()
 
-    def load_project(self, name: str) -> None:
-        """Load an existing project and prepare its recommender.
+        project = Project(
+            id=None,
+            name=name,
+            inputs=inputs,
+            outputs=outputs,
+            target_configs=target_configs,
+            reference_point=reference_point,
+            recommender_config=recommender_config,
+        )
 
-        Loads the project from the database and initializes a recommender
-        instance for it. The recommender is cached for subsequent calls to
-        `suggest()`.
-
-        Parameters
-        ----------
-        name : str
-            Name of the project to load.
-
-        Raises
-        ------
-        ProjectNotFoundError
-            If no project with the given name exists.
-
-        Notes
-        -----
-        This method is optional for most operations. Methods like `suggest()`
-        and `add_observation()` automatically load projects as needed. Use
-        this method when you want to pre-load a project or validate it exists.
-
-        Examples
-        --------
-        >>> folio.load_project("yield_optimization")
-        >>> project = folio.get_project("yield_optimization")
-        """
-        raise NotImplementedError
+        database.create_project(project, self.db_path)
 
     def list_projects(self) -> list[str]:
         """List all project names in the database.
@@ -178,7 +161,7 @@ class Folio:
         >>> folio.list_projects()
         ['optimization_v1', 'screening', 'yield_optimization']
         """
-        raise NotImplementedError
+        return database.list_projects(self.db_path)
 
     def delete_project(self, name: str) -> None:
         """Delete a project and all its observations.
@@ -205,7 +188,9 @@ class Folio:
         --------
         >>> folio.delete_project("old_experiment")
         """
-        raise NotImplementedError
+        if self._recommenders.get(name) is not None:
+            self._recommenders.pop(name)
+        database.delete_project(name, self.db_path)
 
     def add_observation(
         self,
@@ -255,8 +240,14 @@ class Folio:
         ...     notes="Excellent result, consider replicating",
         ... )
         """
-        raise NotImplementedError
-        
+        project = database.get_project(project_name, self.db_path)
+        project_id = project.id
+        project.validate_inputs(inputs)
+        project.validate_outputs(outputs)
+        obs = Observation(
+            project_id=project_id, inputs=inputs, outputs=outputs, tag=tag, notes=notes
+        )
+        database.add_observation(obs, self.db_path)
 
     def delete_observation(self, observation_id: int) -> None:
         """Delete an observation by its database ID.
@@ -315,7 +306,13 @@ class Folio:
         >>> print(next_experiment)
         {'temperature': 85.2, 'pressure': 3.7}
         """
-        raise NotImplementedError
+        project = self.get_project(project_name)
+        if self._recommenders.get(project_name) is None:
+            self._recommenders[project_name] = self._build_recommender(project)
+        rec = self._recommenders[project_name]
+        obs = self.get_observations(project_name)
+        suggestions = rec.recommend(obs)
+        return [suggestions]
 
     def get_project(self, name: str) -> Project:
         """Get a project by name.
@@ -341,7 +338,7 @@ class Folio:
         >>> print(project.inputs)
         [InputSpec(name='temperature', type='continuous', bounds=(20.0, 100.0))]
         """
-        raise NotImplementedError
+        return database.get_project(name, self.db_path)
 
     def get_observations(
         self,
@@ -378,7 +375,12 @@ class Folio:
 
         >>> screening = folio.get_observations("yield_optimization", tag="screening")
         """
-        raise NotImplementedError
+        project = database.get_project(project_name, self.db_path)
+        project_id = project.id
+        observations = database.get_observations(project_id, self.db_path)
+        if tag is not None:
+            return [obs for obs in observations if obs.tag == tag]
+        return observations
 
     def get_recommender(self, project_name: str) -> Recommender | None:
         """Get the cached recommender for a project.
@@ -411,7 +413,7 @@ class Folio:
         >>> if recommender is not None:
         ...     mean, std = recommender.surrogate.predict(X_test)
         """
-        raise NotImplementedError
+        return self._recommenders.get(project_name)
 
     def _build_recommender(self, project: Project) -> Recommender:
         """Build a recommender instance for a project.
@@ -437,4 +439,11 @@ class Folio:
         - "bayesian": BayesianRecommender with configured surrogate/acquisition
         - "random": RandomRecommender for uniform sampling
         """
-        raise NotImplementedError
+        rec_config = project.recommender_config
+        if rec_config.type == "bayesian":
+            rec = BayesianRecommender(project)
+        elif rec_config.type == "random":
+            rec = RandomRecommender(project)
+        else:
+            raise ValueError(f"unknown recommender: {rec_config.type}")
+        return rec

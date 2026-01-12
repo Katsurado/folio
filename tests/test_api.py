@@ -4,7 +4,6 @@ import pytest
 
 from folio.api import Folio
 from folio.core.config import RecommenderConfig, TargetConfig
-from folio.core.observation import Observation
 from folio.core.project import Project
 from folio.core.schema import InputSpec, OutputSpec
 from folio.exceptions import (
@@ -224,34 +223,6 @@ class TestDeleteProject:
         # Delete and verify cache is cleared
         folio.delete_project("cache_test")
         assert folio.get_recommender("cache_test") is None
-
-
-class TestLoadProject:
-    """Tests for Folio.load_project()."""
-
-    def test_load_project_success(
-        self, folio, sample_inputs, sample_outputs, sample_target_configs
-    ):
-        """Load an existing project successfully."""
-        folio.create_project(
-            name="load_test",
-            inputs=sample_inputs,
-            outputs=sample_outputs,
-            target_configs=sample_target_configs,
-        )
-
-        # load_project should not raise
-        folio.load_project("load_test")
-
-        # After loading, recommender should be available
-        recommender = folio.get_recommender("load_test")
-        assert recommender is not None
-        assert isinstance(recommender, Recommender)
-
-    def test_load_project_not_found_raises(self, folio):
-        """Loading non-existent project raises ProjectNotFoundError."""
-        with pytest.raises(ProjectNotFoundError, match="(?i)nonexistent|not found"):
-            folio.load_project("nonexistent_project")
 
 
 class TestGetProject:

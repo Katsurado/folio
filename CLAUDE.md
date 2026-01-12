@@ -148,7 +148,7 @@ src/folio/
 │   └── builtin.py      # DirectTarget, RatioTarget, etc.
 ├── executors/          # Executor interface (HumanExecutor, ClaudeLightExecutor)
 ├── ui/                 # Streamlit app
-├── api.py              # High-level user-facing functions
+├── api.py              # Folio class: main entry point for users
 └── exceptions.py       # Custom exceptions
 ```
 
@@ -156,6 +156,7 @@ Note: `targets/` uses `TYPE_CHECKING` for `Observation` imports to avoid circula
 
 ## Key Abstractions
 
+- **Folio**: Main API class. Orchestrates projects, observations, and recommendations. Caches recommenders per project. Entry point: `Folio(db_path)`.
 - **Project**: Experiment schema (inputs, outputs, target_configs list, reference_point, recommender_config). Supports single and multi-objective via `is_multi_objective()`.
 - **Observation**: Single data point (inputs dict, outputs dict, timestamp, notes, tag, images, failed)
 - **Target**: Extracts scalar optimization target from Observation (direct or derived from outputs)
@@ -357,6 +358,11 @@ with pytest.raises(ValueError, match="Array shapes must match exactly"):
   - [x] Recommender ABC with recommend() and recommend_from_data()
   - [x] RandomRecommender: uniform sampling within bounds
   - [x] BayesianRecommender: GP surrogate + acquisition optimization, surrogate property for state access
+- [x] Folio API (high-level user interface)
+  - [x] Project CRUD: create_project, list_projects, delete_project, get_project
+  - [x] Observation CRUD: add_observation, delete_observation, get_observations (with tag filter)
+  - [x] Recommendation: suggest() returns list[dict] for batch support
+  - [x] Recommender caching: _recommenders dict, _build_recommender, get_recommender
 - [ ] Add images field to Observation
 - [ ] Add procedure, hazards fields to Project
 - [ ] libSQL cloud sync support in Database
