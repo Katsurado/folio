@@ -15,6 +15,7 @@ ensuring each objective contributes equally to the model regardless of scale.
 
 from __future__ import annotations
 
+import torch
 from botorch.models.transforms.outcome import OutcomeTransform
 from botorch.posteriors import Posterior
 from torch import Tensor
@@ -53,22 +54,22 @@ class TaskStandardize(OutcomeTransform):
     Examples
     --------
     >>> transform = TaskStandardize(num_tasks=3)
-    >>> Y_transformed, Y_std = transform.forward(Y, X)
-    >>> Y_original, _ = transform.untransform(Y_transformed, X)
+    >>> y_transformed, y_std = transform.forward(y, X)
+    >>> y_original, _ = transform.untransform(y_transformed, X)
 
     Notes
     -----
     The transform follows BoTorch conventions:
 
-    - forward() returns (Y_transformed, per_row_stds) tuple
+    - forward() returns (y_transformed, per_row_stds) tuple
     - untransform() reverses the transformation
     - untransform_posterior() handles posterior predictive distributions
 
     Math:
         For each task t:
-            mean_t = mean(Y[task_ids == t])
-            std_t = std(Y[task_ids == t])
-            Y_transformed[task_ids == t] = (Y[task_ids == t] - mean_t) / std_t
+            mean_t = mean(y[task_ids == t])
+            std_t = std(y[task_ids == t])
+            y_transformed[task_ids == t] = (y[task_ids == t] - mean_t) / std_t
 
     Reference: Standard practice in multi-objective optimization to normalize
     objectives to comparable scales.
@@ -98,15 +99,15 @@ class TaskStandardize(OutcomeTransform):
         self._stds: Tensor | None = None
         self._is_trained: bool = False
 
-    def forward(self, Y: Tensor, X: Tensor | None = None) -> tuple[Tensor, Tensor]:
-        """Transform Y by standardizing per task.
+    def forward(self, y: Tensor, X: Tensor | None = None) -> tuple[Tensor, Tensor]:
+        """Transform y by standardizing per task.
 
-        On the first call, computes and stores per-task mean and std from Y.
+        On the first call, computes and stores per-task mean and std from y.
         On subsequent calls, uses the stored statistics (frozen).
 
         Parameters
         ----------
-        Y : Tensor, shape (n, 1)
+        y : Tensor, shape (n, 1)
             Outcome values to transform. In MultiTaskGP format, this is a
             column vector with all observations stacked.
         X : Tensor, shape (n, d) or None
@@ -115,9 +116,9 @@ class TaskStandardize(OutcomeTransform):
 
         Returns
         -------
-        Y_transformed : Tensor, shape (n, 1)
+        y_transformed : Tensor, shape (n, 1)
             Standardized outcome values.
-        Yvar : Tensor, shape (n, 1)
+        y_var : Tensor, shape (n, 1)
             Per-observation variance scaling (std^2 for each row's task).
             Used by BoTorch for noise modeling.
 
@@ -126,18 +127,53 @@ class TaskStandardize(OutcomeTransform):
         ValueError
             If X is None (task IDs required for per-task standardization).
         ValueError
-            If Y and X have different number of rows.
+            If y and X have different number of rows.
         ValueError
             If task IDs in X are out of range [0, num_tasks).
         """
-        raise NotImplementedError
+        if X is None:
+            raise ValueError("Need task IDs for per-task standardization")
+        if X.shape[0] != y.shape[0]:
+            raise ValueError(
+                f"Different number of observations: {X.shape[0]} "
+                f"and labels: {y.shape[0]}"
+            )
 
-    def untransform(self, Y: Tensor, X: Tensor | None = None) -> tuple[Tensor, Tensor]:
+        task_ind = X[:, self.task_feature].long()
+
+        if task_ind.min() < 0 or task_ind.max() >= self.num_tasks:
+            raise ValueError(
+                f"Task IDs must be in [0, {self.num_tasks}), "
+                f"got range [{task_ind.min()}, {task_ind.max()}]"
+            )
+
+        if not self._is_trained:
+            self._means = torch.zeros(self.num_tasks, dtype=y.dtype)
+            self._stds = torch.zeros(self.num_tasks, dtype=y.dtype)
+
+            for t in range(self.num_tasks):
+                mask = task_ind == t
+                self._means[t] = y[mask].mean()
+                self._stds[t] = y[mask].std()
+
+            self._is_trained = True
+
+        eps = 10e-9
+
+        mean = self._means[task_ind].unsqueeze(-1)
+        std = self._stds[task_ind].unsqueeze(-1)
+
+        transformed = (y - mean) / (std + eps)
+        var = std.square()
+
+        return transformed, var
+
+    def untransform(self, y: Tensor, X: Tensor | None = None) -> tuple[Tensor, Tensor]:
         """Reverse the per-task standardization.
 
         Parameters
         ----------
-        Y : Tensor, shape (n, 1)
+        y : Tensor, shape (n, 1)
             Transformed outcome values to convert back to original scale.
         X : Tensor, shape (n, d) or None
             Input features including task column. Required to identify which
@@ -145,9 +181,9 @@ class TaskStandardize(OutcomeTransform):
 
         Returns
         -------
-        Y_original : Tensor, shape (n, 1)
+        y_original : Tensor, shape (n, 1)
             Outcome values in original scale.
-        Yvar : Tensor, shape (n, 1)
+        y_var : Tensor, shape (n, 1)
             Per-observation variance scaling.
 
         Raises
@@ -157,6 +193,7 @@ class TaskStandardize(OutcomeTransform):
         ValueError
             If transform has not been trained (forward() not called yet).
         """
+        task_ind = X[:, self.task_feature].long()
         raise NotImplementedError
 
     def untransform_posterior(self, posterior: Posterior) -> Posterior:
