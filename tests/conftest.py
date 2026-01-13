@@ -1,5 +1,6 @@
 """Shared pytest fixtures for Folio tests."""
 
+import gc
 import tempfile
 from pathlib import Path
 
@@ -8,9 +9,17 @@ import pytest
 
 @pytest.fixture
 def temp_db():
-    """Provide a temporary database path that's cleaned up after test."""
+    """Provide a temporary database path that's cleaned up after test.
+
+    Note: gc.collect() is called after yield to ensure SQLite connections
+    are fully released before cleanup. This is required on Windows where
+    open files cannot be deleted.
+    """
     with tempfile.TemporaryDirectory() as tmpdir:
         yield Path(tmpdir) / "test.db"
+        # Force garbage collection to release any lingering SQLite connections
+        # before the temp directory is deleted (required for Windows)
+        gc.collect()
 
 
 @pytest.fixture

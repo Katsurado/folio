@@ -1,5 +1,7 @@
 """Tests for Folio high-level API."""
 
+import gc
+
 import pytest
 
 from folio.api import Folio
@@ -20,14 +22,21 @@ from folio.recommenders.random import RandomRecommender
 
 @pytest.fixture
 def temp_db(tmp_path):
-    """Create a temporary database path for testing."""
-    return tmp_path / "test.db"
+    """Create a temporary database path for testing.
+
+    Note: gc.collect() is called after yield to ensure SQLite connections
+    are fully released before pytest cleans up tmp_path. This is required
+    on Windows where open files cannot be deleted.
+    """
+    yield tmp_path / "test.db"
+    gc.collect()
 
 
 @pytest.fixture
 def folio(temp_db):
     """Create a Folio instance with a temporary database."""
-    return Folio(db_path=temp_db)
+    yield Folio(db_path=temp_db)
+    gc.collect()
 
 
 @pytest.fixture
