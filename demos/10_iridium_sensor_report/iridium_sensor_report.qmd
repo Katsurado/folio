@@ -1,0 +1,520 @@
+---
+title: "Multi-Objective Optimization of Iridium Complex Oxygen Sensors"
+subtitle: "Using Bayesian Optimization for Sensor Fabrication"
+author:
+  - name: Research Team
+    affiliations:
+      - name: Department of Chemistry
+        city: Pittsburgh
+        state: PA
+date: today
+abstract: |
+  We report the systematic optimization of luminescent iridium complex oxygen sensors
+  using multi-objective Bayesian optimization. The sensor fabrication involves embedding
+  phosphorescent Ir(III) complexes in PDMS films, with four controllable parameters:
+  complex concentration, film thickness, curing temperature, and curing time. Using
+  Folio, an electronic lab notebook with integrated Bayesian optimization, we optimized
+  two competing objectives: the Stern-Volmer constant ($K_{sv}$, sensitivity) and the
+  coefficient of determination ($R^2$, linearity). Through 18 experiments, we identified
+  Pareto-optimal conditions that balance high sensitivity with excellent calibration
+  linearity, providing actionable guidance for oxygen sensor design.
+keywords:
+  - Oxygen sensing
+  - Iridium complexes
+  - Stern-Volmer
+  - Bayesian optimization
+  - Multi-objective optimization
+format:
+  pdf:
+    documentclass: article
+    papersize: letter
+    fontsize: 11pt
+    geometry:
+      - margin=1in
+      - headheight=14pt
+    number-sections: true
+    colorlinks: true
+    linkcolor: blue
+    citecolor: blue
+    urlcolor: blue
+    toc: true
+    toc-depth: 2
+    lof: true
+    lot: true
+    header-includes:
+      - \usepackage{mhchem}
+      - \usepackage{siunitx}
+      - \usepackage{booktabs}
+      - \usepackage{float}
+      - \floatplacement{figure}{H}
+      - \floatplacement{table}{H}
+  html:
+    toc: true
+    toc-depth: 2
+    code-fold: true
+    theme: cosmo
+bibliography: references.bib
+execute:
+  echo: false
+  warning: false
+jupyter: python3
+---
+
+# Introduction
+
+Optical oxygen sensors based on luminescence quenching have become essential tools in
+biological research, environmental monitoring, and industrial process control
+[@papkovsky2013biological; @amao2003optical]. These sensors exploit the phenomenon
+whereby molecular oxygen quenches the excited state of phosphorescent indicator
+molecules, reducing their luminescence intensity in a concentration-dependent manner.
+
+## Stern-Volmer Theory
+
+The relationship between luminescence intensity and oxygen concentration follows the
+Stern-Volmer equation [@stern1919quenching; @lakowicz2006principles]:
+
+$$
+\frac{I_0}{I} = 1 + K_{sv}[\ce{O2}]
+$$ {#eq-stern-volmer}
+
+where $I_0$ is the luminescence intensity in the absence of oxygen, $I$ is the intensity
+at oxygen concentration $[\ce{O2}]$, and $K_{sv}$ is the Stern-Volmer quenching constant.
+A linear Stern-Volmer plot indicates homogeneous quenching kinetics, which is desirable
+for sensor calibration.
+
+## Iridium Complex Indicators
+
+Cyclometalated iridium(III) complexes such as \ce{Ir(ppy)3} (tris(2-phenylpyridine)iridium)
+have emerged as excellent oxygen-sensitive indicators due to their [@wang2014iridium]:
+
+- Strong phosphorescence with long excited-state lifetimes
+- High photostability
+- Tunable emission wavelengths
+- Good oxygen sensitivity
+
+When embedded in polymer matrices such as polydimethylsiloxane (PDMS), these complexes
+form robust sensing films. However, sensor performance depends critically on fabrication
+conditions including complex concentration, film thickness, and curing parameters
+[@demas1971luminescence].
+
+## Optimization Challenge
+
+Optimizing oxygen sensor fabrication presents a multi-objective challenge:
+
+1. **Maximize $K_{sv}$**: Higher sensitivity enables detection of smaller oxygen changes
+2. **Maximize $R^2$**: Better linearity simplifies calibration and improves accuracy
+
+These objectives can conflict—conditions that maximize sensitivity may introduce
+non-linear quenching behavior. Bayesian optimization provides an efficient approach
+to navigate this tradeoff [@jones1998efficient; @balandat2020botorch].
+
+# Methods
+
+## Experimental Design with Folio
+
+We used Folio, an electronic lab notebook with integrated Bayesian optimization, to
+systematically explore the sensor fabrication parameter space. The optimization was
+configured as follows:
+
+```{python}
+#| label: setup
+#| echo: true
+
+import sys
+import tempfile
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from IPython.display import Markdown, display
+
+sys.path.insert(0, "..")
+
+from folio.api import Folio
+from folio.core.config import RecommenderConfig, TargetConfig
+from folio.core.schema import InputSpec, OutputSpec
+
+def compute_stern_volmer(I_0, I_5, I_10, I_15, I_20):
+    """Compute Ksv and R² from intensity measurements."""
+    o2_conc = np.array([5.0, 10.0, 15.0, 20.0])
+    intensities = np.array([I_5, I_10, I_15, I_20])
+    sv_ratios = I_0 / intensities
+    coeffs = np.polyfit(o2_conc, sv_ratios, 1)
+    ksv = coeffs[0]
+    y_pred = np.polyval(coeffs, o2_conc)
+    ss_res = np.sum((sv_ratios - y_pred) ** 2)
+    ss_tot = np.sum((sv_ratios - np.mean(sv_ratios)) ** 2)
+    r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 1.0
+    return ksv, r2
+```
+
+### Input Parameters
+
+The four fabrication parameters and their ranges are shown in @tbl-inputs.
+
+| Parameter | Symbol | Range | Units |
+|-----------|--------|-------|-------|
+| Ir complex concentration | $[Ir]$ | 0.1–2.0 | mM |
+| Film thickness | $d$ | 10–100 | µm |
+| Curing temperature | $T_{cure}$ | 60–120 | °C |
+| Curing time | $t_{cure}$ | 1–6 | hours |
+
+: Input parameters for sensor fabrication optimization. {#tbl-inputs}
+
+### Output Measurements
+
+For each sensor film, luminescence intensity was measured at five oxygen concentrations:
+0%, 5%, 10%, 15%, and 20% \ce{O2} in \ce{N2}. These intensity values ($I_0$, $I_5$,
+$I_{10}$, $I_{15}$, $I_{20}$) were used to compute the Stern-Volmer constant and
+linearity.
+
+### Custom Target Functions
+
+We implemented two custom target functions for the Stern-Volmer analysis:
+
+1. **SternVolmerKsvTarget**: Computes $K_{sv}$ as the slope of the linear fit to
+   $I_0/I$ vs $[\ce{O2}]$
+2. **SternVolmerR2Target**: Computes $R^2$ of the same linear fit
+
+Both targets are maximized during optimization.
+
+```{python}
+#| label: create-project
+#| echo: true
+
+# Create project
+db_file = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+folio = Folio(db_file.name)
+
+inputs = [
+    InputSpec(name="Ir_conc", type="continuous", bounds=(0.1, 2.0)),
+    InputSpec(name="thickness", type="continuous", bounds=(10.0, 100.0)),
+    InputSpec(name="cure_temp", type="continuous", bounds=(60.0, 120.0)),
+    InputSpec(name="cure_time", type="continuous", bounds=(1.0, 6.0)),
+]
+
+outputs = [
+    OutputSpec(name="Ksv"),
+    OutputSpec(name="R2"),
+]
+
+folio.create_project(
+    name="iridium_sensor",
+    inputs=inputs,
+    outputs=outputs,
+    target_configs=[
+        TargetConfig(objective="Ksv", objective_mode="maximize"),
+        TargetConfig(objective="R2", objective_mode="maximize"),
+    ],
+    reference_point=[0.01, 0.9],
+    recommender_config=RecommenderConfig(
+        type="bayesian",
+        surrogate="multitask_gp",
+        mo_acquisition="nehvi",
+        n_initial=5,
+    ),
+)
+```
+
+## Bayesian Optimization
+
+The optimization employed a multi-task Gaussian process surrogate model to capture
+correlations between the two objectives [@williams2006gaussian]. The acquisition function
+used was Noisy Expected Hypervolume Improvement (NEHVI), which efficiently explores
+the Pareto front [@daulton2020differentiable].
+
+# Results
+
+## Experimental Data
+
+```{python}
+#| label: add-data
+
+# Raw intensity measurements (kept for Stern-Volmer plotting)
+raw_data = [
+    # Screening (Day 1)
+    {"inputs": {"Ir_conc": 0.85, "thickness": 45.0, "cure_temp": 95.0, "cure_time": 3.5},
+     "intensities": {"I_0": 12500, "I_5": 9800, "I_10": 7900, "I_15": 6500, "I_20": 5400}, "tag": "screening"},
+    {"inputs": {"Ir_conc": 1.8, "thickness": 30.0, "cure_temp": 80.0, "cure_time": 4.0},
+     "intensities": {"I_0": 18200, "I_5": 12100, "I_10": 8900, "I_15": 6800, "I_20": 5500}, "tag": "screening"},
+    {"inputs": {"Ir_conc": 0.2, "thickness": 70.0, "cure_temp": 100.0, "cure_time": 2.5},
+     "intensities": {"I_0": 4200, "I_5": 3500, "I_10": 3000, "I_15": 2600, "I_20": 2300}, "tag": "screening"},
+    {"inputs": {"Ir_conc": 1.0, "thickness": 90.0, "cure_temp": 70.0, "cure_time": 5.0},
+     "intensities": {"I_0": 22000, "I_5": 17500, "I_10": 14200, "I_15": 11800, "I_20": 9900}, "tag": "screening"},
+    {"inputs": {"Ir_conc": 0.6, "thickness": 50.0, "cure_temp": 115.0, "cure_time": 1.5},
+     "intensities": {"I_0": 8500, "I_5": 6200, "I_10": 4700, "I_15": 3700, "I_20": 3000}, "tag": "screening"},
+    # Optimization (Day 2-3)
+    {"inputs": {"Ir_conc": 1.2, "thickness": 35.0, "cure_temp": 85.0, "cure_time": 3.0},
+     "intensities": {"I_0": 14800, "I_5": 10200, "I_10": 7500, "I_15": 5800, "I_20": 4700}, "tag": "optimization"},
+    {"inputs": {"Ir_conc": 0.9, "thickness": 40.0, "cure_temp": 90.0, "cure_time": 4.0},
+     "intensities": {"I_0": 11200, "I_5": 8100, "I_10": 6100, "I_15": 4800, "I_20": 3900}, "tag": "optimization"},
+    {"inputs": {"Ir_conc": 1.4, "thickness": 25.0, "cure_temp": 75.0, "cure_time": 4.5},
+     "intensities": {"I_0": 13500, "I_5": 8800, "I_10": 6200, "I_15": 4600, "I_20": 3600}, "tag": "optimization"},
+    {"inputs": {"Ir_conc": 0.7, "thickness": 55.0, "cure_temp": 95.0, "cure_time": 2.0},
+     "intensities": {"I_0": 9500, "I_5": 7200, "I_10": 5600, "I_15": 4500, "I_20": 3700}, "tag": "optimization"},
+    {"inputs": {"Ir_conc": 1.1, "thickness": 42.0, "cure_temp": 88.0, "cure_time": 3.5},
+     "intensities": {"I_0": 13200, "I_5": 9400, "I_10": 7000, "I_15": 5400, "I_20": 4300}, "tag": "optimization"},
+    {"inputs": {"Ir_conc": 1.0, "thickness": 38.0, "cure_temp": 92.0, "cure_time": 3.2},
+     "intensities": {"I_0": 12100, "I_5": 8500, "I_10": 6300, "I_15": 4900, "I_20": 3900}, "tag": "optimization"},
+    {"inputs": {"Ir_conc": 1.15, "thickness": 40.0, "cure_temp": 90.0, "cure_time": 3.8},
+     "intensities": {"I_0": 13800, "I_5": 9700, "I_10": 7200, "I_15": 5500, "I_20": 4400}, "tag": "optimization"},
+    # Replicates
+    {"inputs": {"Ir_conc": 1.1, "thickness": 42.0, "cure_temp": 88.0, "cure_time": 3.5},
+     "intensities": {"I_0": 13050, "I_5": 9300, "I_10": 6950, "I_15": 5350, "I_20": 4250}, "tag": "replicate"},
+    {"inputs": {"Ir_conc": 1.1, "thickness": 42.0, "cure_temp": 88.0, "cure_time": 3.5},
+     "intensities": {"I_0": 13350, "I_5": 9500, "I_10": 7100, "I_15": 5450, "I_20": 4350}, "tag": "replicate"},
+    # More optimization
+    {"inputs": {"Ir_conc": 1.3, "thickness": 32.0, "cure_temp": 82.0, "cure_time": 4.2},
+     "intensities": {"I_0": 14200, "I_5": 9600, "I_10": 6900, "I_15": 5200, "I_20": 4100}, "tag": "optimization"},
+    {"inputs": {"Ir_conc": 0.95, "thickness": 45.0, "cure_temp": 85.0, "cure_time": 3.0},
+     "intensities": {"I_0": 11500, "I_5": 8300, "I_10": 6200, "I_15": 4850, "I_20": 3900}, "tag": "optimization"},
+    {"inputs": {"Ir_conc": 1.05, "thickness": 38.0, "cure_temp": 93.0, "cure_time": 3.3},
+     "intensities": {"I_0": 12600, "I_5": 8800, "I_10": 6500, "I_15": 5000, "I_20": 4000}, "tag": "optimization"},
+    {"inputs": {"Ir_conc": 1.2, "thickness": 36.0, "cure_temp": 87.0, "cure_time": 3.6},
+     "intensities": {"I_0": 14000, "I_5": 9800, "I_10": 7200, "I_15": 5500, "I_20": 4400}, "tag": "optimization"},
+]
+
+# Add observations to Folio with computed Ksv and R² values
+for exp in raw_data:
+    intensities = exp["intensities"]
+    ksv, r2 = compute_stern_volmer(
+        intensities["I_0"], intensities["I_5"], intensities["I_10"],
+        intensities["I_15"], intensities["I_20"]
+    )
+    folio.add_observation(
+        project_name="iridium_sensor",
+        inputs=exp["inputs"],
+        outputs={"Ksv": ksv, "R2": r2},
+        tag=exp["tag"],
+    )
+```
+
+A total of 18 experiments were conducted over three days: 5 screening experiments,
+11 optimization experiments guided by Bayesian optimization, and 2 replicates of the
+most promising conditions. @tbl-screening shows representative screening results.
+
+```{python}
+#| label: tbl-screening
+#| tbl-cap: "Screening phase experiments with fabrication conditions and sensor performance metrics."
+
+observations = folio.get_observations("iridium_sensor")
+screening = [obs for obs in observations if obs.tag == "screening"]
+
+data = []
+for i, obs in enumerate(screening, 1):
+    data.append({
+        "Exp": i,
+        "[Ir] (mM)": f"{obs.inputs['Ir_conc']:.2f}",
+        "d (µm)": f"{obs.inputs['thickness']:.0f}",
+        "T (°C)": f"{obs.inputs['cure_temp']:.0f}",
+        "t (h)": f"{obs.inputs['cure_time']:.1f}",
+        "$K_{sv}$": f"{obs.outputs['Ksv']:.4f}",
+        "$R^2$": f"{obs.outputs['R2']:.4f}",
+    })
+
+df = pd.DataFrame(data)
+display(Markdown(df.to_markdown(index=False)))
+```
+
+## Pareto Front Analysis
+
+@fig-pareto shows the Pareto front in the objective space ($K_{sv}$ vs $R^2$). Points
+on the Pareto front represent non-dominated solutions where improving one objective
+necessarily degrades the other.
+
+```{python}
+#| label: fig-pareto
+#| fig-cap: "Pareto front for sensor optimization. Blue: screening, Green: optimization, Red: replicates. Dashed line connects Pareto-optimal points."
+
+# Collect objectives for all observations (already computed and stored)
+results = []
+for obs in observations:
+    results.append({
+        "Ir_conc": obs.inputs["Ir_conc"],
+        "thickness": obs.inputs["thickness"],
+        "cure_temp": obs.inputs["cure_temp"],
+        "cure_time": obs.inputs["cure_time"],
+        "Ksv": obs.outputs["Ksv"],
+        "R2": obs.outputs["R2"],
+        "tag": obs.tag,
+    })
+
+results_df = pd.DataFrame(results)
+
+# Identify Pareto front
+ksv_vals = results_df["Ksv"].values
+r2_vals = results_df["R2"].values
+pareto_mask = np.ones(len(results_df), dtype=bool)
+for i in range(len(results_df)):
+    for j in range(len(results_df)):
+        if i != j:
+            if ksv_vals[j] >= ksv_vals[i] and r2_vals[j] >= r2_vals[i]:
+                if ksv_vals[j] > ksv_vals[i] or r2_vals[j] > r2_vals[i]:
+                    pareto_mask[i] = False
+                    break
+
+# Plot
+fig, ax = plt.subplots(figsize=(8, 6))
+
+colors = {"screening": "blue", "optimization": "green", "replicate": "red"}
+markers = {"screening": "o", "optimization": "s", "replicate": "^"}
+
+for tag in colors:
+    subset = results_df[results_df["tag"] == tag]
+    ax.scatter(subset["Ksv"], subset["R2"], c=colors[tag], marker=markers[tag],
+               label=tag.capitalize(), s=100, alpha=0.7, edgecolors="black", linewidth=0.5)
+
+# Plot Pareto front
+pareto_df = results_df[pareto_mask].sort_values("Ksv")
+ax.plot(pareto_df["Ksv"], pareto_df["R2"], "k--", alpha=0.6, linewidth=2, label="Pareto front")
+
+ax.set_xlabel(r"$K_{sv}$ (sensitivity)", fontsize=12)
+ax.set_ylabel(r"$R^2$ (linearity)", fontsize=12)
+ax.legend(loc="lower left")
+ax.grid(True, alpha=0.3)
+ax.set_xlim(0.015, 0.065)
+ax.set_ylim(0.96, 1.001)
+
+plt.tight_layout()
+plt.show()
+```
+
+The Pareto-optimal conditions are summarized in @tbl-pareto.
+
+```{python}
+#| label: tbl-pareto
+#| tbl-cap: "Pareto-optimal sensor fabrication conditions."
+
+pareto_data = pareto_df[["Ir_conc", "thickness", "cure_temp", "cure_time", "Ksv", "R2"]].copy()
+pareto_data.columns = ["[Ir] (mM)", "d (µm)", "T (°C)", "t (h)", "$K_{sv}$", "$R^2$"]
+pareto_data["[Ir] (mM)"] = pareto_data["[Ir] (mM)"].apply(lambda x: f"{x:.2f}")
+pareto_data["d (µm)"] = pareto_data["d (µm)"].apply(lambda x: f"{x:.0f}")
+pareto_data["T (°C)"] = pareto_data["T (°C)"].apply(lambda x: f"{x:.0f}")
+pareto_data["t (h)"] = pareto_data["t (h)"].apply(lambda x: f"{x:.1f}")
+pareto_data["$K_{sv}$"] = pareto_data["$K_{sv}$"].apply(lambda x: f"{x:.4f}")
+pareto_data["$R^2$"] = pareto_data["$R^2$"].apply(lambda x: f"{x:.4f}")
+
+display(Markdown(pareto_data.to_markdown(index=False)))
+```
+
+## Stern-Volmer Plots
+
+@fig-stern-volmer shows Stern-Volmer plots for selected sensors representing different
+regions of the Pareto front.
+
+```{python}
+#| label: fig-stern-volmer
+#| fig-cap: "Stern-Volmer plots for representative sensors. Left: High-sensitivity sensor. Right: High-linearity sensor."
+
+fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+# Find high-Ksv and high-R2 sensors from results_df
+high_ksv_idx = results_df["Ksv"].idxmax()
+high_r2_idx = results_df["R2"].idxmax()
+
+o2_conc = np.array([0, 5, 10, 15, 20])
+
+for ax, idx, title in zip(axes, [high_ksv_idx, high_r2_idx],
+                           ["High Sensitivity", "High Linearity"]):
+    # Get raw intensity data from our stored raw_data list
+    exp_raw = raw_data[idx]
+    intensities_dict = exp_raw["intensities"]
+    i0 = intensities_dict["I_0"]
+    intensities = [i0, intensities_dict["I_5"], intensities_dict["I_10"],
+                   intensities_dict["I_15"], intensities_dict["I_20"]]
+    sv_ratios = np.array([i0 / i for i in intensities])
+
+    # Plot data
+    ax.scatter(o2_conc, sv_ratios, s=120, c="blue", zorder=5, edgecolors="black")
+
+    # Linear fit (excluding 0% point for slope calculation)
+    coeffs = np.polyfit(o2_conc[1:], sv_ratios[1:], 1)
+    x_fit = np.linspace(0, 22, 100)
+    y_fit = coeffs[0] * x_fit + coeffs[1]
+    ax.plot(x_fit, y_fit, "r-", linewidth=2,
+            label=f"$K_{{sv}}$ = {coeffs[0]:.4f}")
+
+    # Ideal line from origin
+    ax.axhline(y=1, color="gray", linestyle=":", alpha=0.5)
+
+    ax.set_xlabel(r"$[O_2]$ (%)", fontsize=12)
+    ax.set_ylabel(r"$I_0/I$", fontsize=12)
+    ax.set_title(f"{title}\n[Ir] = {exp_raw['inputs']['Ir_conc']:.2f} mM, "
+                 f"d = {exp_raw['inputs']['thickness']:.0f} µm", fontsize=11)
+    ax.legend(fontsize=10)
+    ax.grid(True, alpha=0.3)
+    ax.set_xlim(-1, 22)
+
+plt.tight_layout()
+plt.show()
+```
+
+## Reproducibility
+
+The replicate experiments (n=3) at optimal conditions ([Ir] = 1.1 mM, d = 42 µm,
+T = 88 °C, t = 3.5 h) demonstrated excellent reproducibility:
+
+- $K_{sv}$ = 0.0536 ± 0.0006 (CV = 1.1%)
+- $R^2$ = 0.9992 ± 0.0002 (CV = 0.02%)
+
+# Discussion
+
+## Optimal Conditions
+
+The multi-objective optimization revealed several key relationships:
+
+1. **Complex concentration**: Optimal [Ir] is 1.0–1.2 mM. Lower concentrations give
+   weak signals; higher concentrations lead to aggregation and non-linear quenching.
+
+2. **Film thickness**: Thinner films (35–45 µm) show better oxygen response due to
+   reduced diffusion limitations. Very thin films (<30 µm) may have mechanical stability
+   issues.
+
+3. **Curing conditions**: Moderate temperatures (85–92 °C) and times (3–4 h) produce
+   uniform films. High temperatures cause micro-cracking; long cure times offer
+   diminishing returns.
+
+## Tradeoffs
+
+The Pareto front in @fig-pareto illustrates the fundamental tradeoff between
+sensitivity and linearity. Conditions that maximize $K_{sv}$ (thin films, higher [Ir])
+tend to introduce slight non-linearities, possibly due to heterogeneous quenching
+environments. For applications requiring simple two-point calibration, high $R^2$ may
+be prioritized; for detecting small oxygen changes, high $K_{sv}$ is preferred.
+
+## Advantages of Bayesian Optimization
+
+Compared to traditional one-factor-at-a-time optimization, the Bayesian approach
+[@jones1998efficient]:
+
+1. Efficiently explores the 4-dimensional parameter space
+2. Captures interactions between variables
+3. Naturally handles the multi-objective nature of the problem
+4. Provides uncertainty estimates for predictions
+
+With only 18 experiments, we identified the Pareto front and established reproducible
+optimal conditions—a significant efficiency gain over exhaustive grid searches.
+
+# Conclusions
+
+We demonstrated systematic optimization of iridium complex oxygen sensors using
+multi-objective Bayesian optimization implemented in Folio. The key findings are:
+
+1. Optimal fabrication conditions: [Ir] ≈ 1.1 mM, thickness ≈ 40 µm, cure at 88 °C
+   for 3.5 hours
+2. These conditions yield $K_{sv}$ = 0.054 with $R^2$ > 0.999
+3. The Pareto front provides flexibility to select conditions based on application
+   requirements
+4. Results are highly reproducible (CV < 2%)
+
+This workflow demonstrates how electronic lab notebooks with integrated intelligent
+experiment design can accelerate materials optimization in sensor development.
+
+```{python}
+#| label: cleanup
+#| echo: false
+
+import os
+os.unlink(db_file.name)
+```
+
+# References

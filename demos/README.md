@@ -12,4 +12,6 @@
 - `06_extending_folio.ipynb` - Custom surrogates, acquisitions, and recommenders
 - `07_polymer_optimization_quarto/` - Quarto version of polymer optimization demo
 - `08_experiment_report/` - Publication-ready report template with LaTeX features
-- `extensions/` - Reusable custom model implementations
+- `09_iridium_sensor.ipynb` - Iridium oxygen sensor optimization with custom targets
+- `10_iridium_sensor_report/` - Publication-ready Stern-Volmer sensor report
+- `extensions/` - Reusable custom model implementations (surrogates, targets)
