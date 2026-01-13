@@ -50,3 +50,7 @@ class NotFittedError(SurrogateError):
     NotFittedError: This GPSurrogate instance is not fitted yet. Call 'fit'
     with training data before using 'predict'.
     """
+
+
+class ExecutorError(FolioError):
+    """Raised when an executor fails to run an experiment."""
