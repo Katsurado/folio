@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 
 from folio.core.observation import Observation
 from folio.core.project import Project
+from folio.exceptions import ExecutorError
 
 
 class Executor(ABC):
@@ -42,7 +43,11 @@ class Executor(ABC):
         ExecutorError
             If the experiment execution fails.
         """
-        ...
+        project.validate_inputs(suggestion)
+        try:
+            return self._run(suggestion, project)
+        except Exception as e:
+            raise ExecutorError(f"Execution failed: {e}") from e
 
     @abstractmethod
     def _run(self, suggestion: dict, project: Project) -> Observation:

@@ -350,7 +350,8 @@ class BayesianRecommender(Recommender):
         X = torch.from_numpy(X)
         y = torch.from_numpy(y)
 
-        # TEMP AL branch for AL demo with claude light
+        # TODO TEMP AL branch for AL demo with claude light
+        # TODO: clean up for proper AL/BO branching
         if self.project.recommender_config.acquisition == "variance":
             builder = PosteriorVariance()
             return builder.build(self._surrogate.model)

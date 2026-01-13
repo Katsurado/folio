@@ -19,8 +19,11 @@ class Observation:
     project_id : int
         ID of the project this observation belongs to. Must be a positive integer.
     inputs : dict[str, float | str]
-        Input variable values used in this experiment. Keys are input names,
+        Actual input variable values used in this experiment. Keys are input names,
         values are numeric (for continuous) or string (for categorical) inputs.
+    inputs_suggested : dict[str, float | str]
+        Input variable values suggested. For wet lab experiments, actual input
+        may not be exactly same as suggested input.
     outputs : dict[str, float]
         Measured output values from this experiment. Keys are output names,
         values are numeric measurements.
@@ -59,6 +62,7 @@ class Observation:
     project_id: int
     inputs: dict[str, float | str]
     outputs: dict[str, float]
+    inputs_suggested: dict[str, float | str] | None = None
     timestamp: datetime = field(default_factory=datetime.now)
     id: int | None = None
     notes: str | None = None
