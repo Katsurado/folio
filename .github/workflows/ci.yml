@@ -19,10 +19,14 @@ jobs:
       - run: black --check .
 
   test:
-    runs-on: ubuntu-latest
     strategy:
       matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
         python-version: ["3.10", "3.11", "3.12"]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,6 +36,6 @@ jobs:
       - run: pytest --cov=folio --cov-report=xml -W "ignore::gpytorch.utils.warnings.NumericalWarning" -W "ignore::linear_operator.utils.warnings.NumericalWarning" -W "ignore:torch.sparse.SparseTensor:UserWarning"
       - name: Upload coverage
         uses: codecov/codecov-action@v4
-        if: matrix.python-version == '3.11'
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
         with:
           files: ./coverage.xml
