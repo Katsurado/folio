@@ -1018,3 +1018,280 @@ class TestBayesianRecommenderErrorHandling:
         recommender._fit_surrogate(X, y)
         with pytest.raises(ValueError, match="(?i)unknown|acquisition"):
             recommender._build_acquisition(X, y, [True, True])
+
+
+class TestBayesianRecommenderVarianceAcquisition:
+    """Test BayesianRecommender with PosteriorVariance acquisition."""
+
+    @pytest.fixture
+    def variance_project_single_output(self):
+        """Create a single-output project with variance acquisition."""
+        return Project(
+            id=1,
+            name="variance_single",
+            inputs=[
+                InputSpec("x1", "continuous", bounds=(0.0, 10.0)),
+                InputSpec("x2", "continuous", bounds=(-5.0, 5.0)),
+            ],
+            outputs=[OutputSpec("y")],
+            target_configs=[TargetConfig(objective="y", objective_mode="maximize")],
+            recommender_config=RecommenderConfig(
+                type="bayesian",
+                surrogate="gp",
+                acquisition="variance",
+                n_initial=3,
+            ),
+        )
+
+    @pytest.fixture
+    def variance_project_multi_output(self):
+        """Create a multi-output project with variance acquisition."""
+        return Project(
+            id=1,
+            name="variance_multi",
+            inputs=[
+                InputSpec("x1", "continuous", bounds=(0.0, 10.0)),
+                InputSpec("x2", "continuous", bounds=(-5.0, 5.0)),
+            ],
+            outputs=[OutputSpec("y1"), OutputSpec("y2")],
+            target_configs=[
+                TargetConfig(objective="y1", objective_mode="maximize"),
+                TargetConfig(objective="y2", objective_mode="minimize"),
+            ],
+            reference_point=[0.0, 10.0],
+            recommender_config=RecommenderConfig(
+                type="bayesian",
+                surrogate="multitask_gp",
+                acquisition="variance",
+                n_initial=3,
+            ),
+        )
+
+    @pytest.fixture
+    def single_output_observations(self):
+        """Observations for single-output variance testing."""
+        return [
+            Observation(
+                project_id=1,
+                inputs={"x1": 5.0, "x2": 0.0},
+                outputs={"y": 10.0},
+            ),
+            Observation(
+                project_id=1,
+                inputs={"x1": 2.0, "x2": -3.0},
+                outputs={"y": 7.0},
+            ),
+            Observation(
+                project_id=1,
+                inputs={"x1": 8.0, "x2": 2.0},
+                outputs={"y": 15.0},
+            ),
+        ]
+
+    @pytest.fixture
+    def multi_output_observations(self):
+        """Observations for multi-output variance testing."""
+        return [
+            Observation(
+                project_id=1,
+                inputs={"x1": 5.0, "x2": 0.0},
+                outputs={"y1": 10.0, "y2": 2.0},
+            ),
+            Observation(
+                project_id=1,
+                inputs={"x1": 2.0, "x2": -3.0},
+                outputs={"y1": 7.0, "y2": 5.0},
+            ),
+            Observation(
+                project_id=1,
+                inputs={"x1": 8.0, "x2": 2.0},
+                outputs={"y1": 15.0, "y2": 1.0},
+            ),
+        ]
+
+    def test_variance_acquisition_single_output_returns_dict(
+        self, variance_project_single_output, single_output_observations
+    ):
+        """Variance acquisition returns valid dict for single-output project."""
+        torch.manual_seed(42)
+        recommender = BayesianRecommender(variance_project_single_output)
+        result = recommender.recommend(single_output_observations)
+        assert isinstance(result, dict)
+        assert set(result.keys()) == {"x1", "x2"}
+
+    def test_variance_acquisition_single_output_within_bounds(
+        self, variance_project_single_output, single_output_observations
+    ):
+        """Variance acquisition returns values within bounds for single-output."""
+        torch.manual_seed(42)
+        recommender = BayesianRecommender(variance_project_single_output)
+        result = recommender.recommend(single_output_observations)
+        assert 0.0 <= result["x1"] <= 10.0
+        assert -5.0 <= result["x2"] <= 5.0
+
+    def test_variance_acquisition_multi_output_returns_dict(
+        self, variance_project_multi_output, multi_output_observations
+    ):
+        """Variance acquisition returns valid dict for multi-output project."""
+        torch.manual_seed(42)
+        recommender = BayesianRecommender(variance_project_multi_output)
+        result = recommender.recommend(multi_output_observations)
+        assert isinstance(result, dict)
+        assert set(result.keys()) == {"x1", "x2"}
+
+    def test_variance_acquisition_multi_output_within_bounds(
+        self, variance_project_multi_output, multi_output_observations
+    ):
+        """Variance acquisition returns values within bounds for multi-output."""
+        torch.manual_seed(42)
+        recommender = BayesianRecommender(variance_project_multi_output)
+        result = recommender.recommend(multi_output_observations)
+        assert 0.0 <= result["x1"] <= 10.0
+        assert -5.0 <= result["x2"] <= 5.0
+
+    def test_variance_acquisition_builds_posterior_variance(
+        self, variance_project_single_output, single_output_observations
+    ):
+        """Variance config builds _PosteriorVarianceAcquisition."""
+        from folio.recommenders.acquisitions.al_functions import (
+            _PosteriorVarianceAcquisition,
+        )
+
+        torch.manual_seed(42)
+        recommender = BayesianRecommender(variance_project_single_output)
+        X, y = variance_project_single_output.get_training_data(
+            single_output_observations
+        )
+        recommender._fit_surrogate(X, y)
+        acq = recommender._build_acquisition(X, y, [True])
+        assert isinstance(acq, _PosteriorVarianceAcquisition)
+
+    def test_variance_acquisition_builds_posterior_variance_multi_output(
+        self, variance_project_multi_output, multi_output_observations
+    ):
+        """Variance config builds _PosteriorVarianceAcquisition for multi-output."""
+        from folio.recommenders.acquisitions.al_functions import (
+            _PosteriorVarianceAcquisition,
+        )
+
+        torch.manual_seed(42)
+        recommender = BayesianRecommender(variance_project_multi_output)
+        X, y = variance_project_multi_output.get_training_data(
+            multi_output_observations
+        )
+        recommender._fit_surrogate(X, y)
+        acq = recommender._build_acquisition(X, y, [True, False])
+        assert isinstance(acq, _PosteriorVarianceAcquisition)
+
+    def test_variance_acquisition_recommend_from_data_single(
+        self, variance_project_single_output
+    ):
+        """recommend_from_data works with variance acquisition for single-output."""
+        torch.manual_seed(42)
+        recommender = BayesianRecommender(variance_project_single_output)
+        X = np.array([[5.0, 0.0], [2.0, -3.0], [8.0, 2.0]])
+        y = np.array([[10.0], [7.0], [15.0]])
+        bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
+        result = recommender.recommend_from_data(X, y, bounds, [True])
+        assert result.shape == (2,)
+        assert np.all((bounds[0, :] <= result) & (result <= bounds[1, :]))
+
+    def test_variance_acquisition_recommend_from_data_multi(
+        self, variance_project_multi_output
+    ):
+        """recommend_from_data works with variance acquisition for multi-output."""
+        torch.manual_seed(42)
+        recommender = BayesianRecommender(variance_project_multi_output)
+        X = np.array([[5.0, 0.0], [2.0, -3.0], [8.0, 2.0]])
+        y = np.array([[10.0, 2.0], [7.0, 5.0], [15.0, 1.0]])
+        bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
+        result = recommender.recommend_from_data(X, y, bounds, [True, False])
+        assert result.shape == (2,)
+        assert np.all((bounds[0, :] <= result) & (result <= bounds[1, :]))
+
+    def test_variance_acquisition_explores_uncertain_regions(
+        self, variance_project_single_output
+    ):
+        """Variance acquisition suggests points far from training data (exploration).
+
+        When training data is clustered in one region, variance acquisition
+        should suggest points in unexplored regions where uncertainty is high.
+        """
+        torch.manual_seed(42)
+        # All training points clustered around x1=5, x2=0
+        observations = [
+            Observation(
+                project_id=1,
+                inputs={"x1": 4.5, "x2": -0.5},
+                outputs={"y": 10.0},
+            ),
+            Observation(
+                project_id=1,
+                inputs={"x1": 5.0, "x2": 0.0},
+                outputs={"y": 10.0},
+            ),
+            Observation(
+                project_id=1,
+                inputs={"x1": 5.5, "x2": 0.5},
+                outputs={"y": 10.0},
+            ),
+        ]
+        recommender = BayesianRecommender(variance_project_single_output)
+        result = recommender.recommend(observations)
+
+        # Suggested point should be away from the cluster (exploring)
+        # Distance from cluster center (5, 0)
+        dist_from_cluster = np.sqrt((result["x1"] - 5.0) ** 2 + result["x2"] ** 2)
+        # Should suggest point reasonably far from the cluster
+        assert dist_from_cluster > 1.0
+
+    def test_variance_acquisition_ignores_objective_values(
+        self, variance_project_single_output
+    ):
+        """Variance acquisition is independent of y values.
+
+        Since variance acquisition focuses on uncertainty, not the objective
+        value, different y values with the same X should produce similar
+        recommendations.
+        """
+        torch.manual_seed(42)
+        np.random.seed(42)
+
+        # Same X locations, different y values
+        X = np.array([[5.0, 0.0], [2.0, -3.0], [8.0, 2.0]])
+        y_low = np.array([[1.0], [1.0], [1.0]])
+        y_high = np.array([[100.0], [100.0], [100.0]])
+        bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
+
+        recommender = BayesianRecommender(variance_project_single_output)
+
+        torch.manual_seed(42)
+        result_low = recommender.recommend_from_data(X, y_low, bounds, [True])
+
+        torch.manual_seed(42)
+        result_high = recommender.recommend_from_data(X, y_high, bounds, [True])
+
+        # Results should be very similar since variance only depends on X locations
+        assert np.allclose(result_low, result_high, atol=0.5)
+
+    def test_variance_acquisition_few_observations_returns_random(
+        self, variance_project_single_output
+    ):
+        """Fewer than n_initial observations returns random sample."""
+        observations = [
+            Observation(
+                project_id=1,
+                inputs={"x1": 5.0, "x2": 0.0},
+                outputs={"y": 10.0},
+            ),
+            Observation(
+                project_id=1,
+                inputs={"x1": 2.0, "x2": -3.0},
+                outputs={"y": 7.0},
+            ),
+        ]
+        recommender = BayesianRecommender(variance_project_single_output)
+        result = recommender.recommend(observations)
+        assert 0.0 <= result["x1"] <= 10.0
+        assert -5.0 <= result["x2"] <= 5.0
+        assert recommender.surrogate is None

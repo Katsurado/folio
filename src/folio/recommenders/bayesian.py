@@ -10,6 +10,7 @@ from botorch.optim.optimize import optimize_acqf
 from folio.recommenders.acquisitions import (
     NEHVI,
     ExpectedImprovement,
+    PosteriorVariance,
     UpperConfidenceBound,
 )
 from folio.recommenders.base import Recommender
@@ -348,6 +349,11 @@ class BayesianRecommender(Recommender):
         acq_kwargs = self.project.recommender_config.acquisition_kwargs
         X = torch.from_numpy(X)
         y = torch.from_numpy(y)
+
+        # TEMP AL branch for AL demo with claude light
+        if self.project.recommender_config.acquisition == "variance":
+            builder = PosteriorVariance()
+            return builder.build(self._surrogate.model)
 
         if self.project.is_multi_objective():
             acq_type = self.project.recommender_config.mo_acquisition
