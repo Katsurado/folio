@@ -30,7 +30,9 @@ htmlcov/
 
 # Environment
 .env
+.env.*
 *.env
+.envrc
 
 # Database
 *.db
