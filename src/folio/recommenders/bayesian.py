@@ -292,16 +292,12 @@ class BayesianRecommender(Recommender):
         """
         surrogate_type = self.project.recommender_config.surrogate
         surrogate_kwargs = self.project.recommender_config.surrogate_kwargs
-        if self.project.is_multi_objective():
-            if surrogate_type == "multitask_gp":
-                return MultiTaskGPSurrogate(**surrogate_kwargs)
-            else:
-                raise ValueError(f"Unknown surrogate type: {surrogate_type}")
+        if surrogate_type == "multitask_gp":
+            return MultiTaskGPSurrogate(**surrogate_kwargs)
+        elif surrogate_type == "gp":
+            return SingleTaskGPSurrogate(**surrogate_kwargs)
         else:
-            if surrogate_type == "gp":
-                return SingleTaskGPSurrogate(**surrogate_kwargs)
-            else:
-                raise ValueError(f"Unknown surrogate type: {surrogate_type}")
+            raise ValueError(f"Unknown surrogate type: {surrogate_type}")
 
     def _build_acquisition(
         self, X: np.ndarray, y: np.ndarray, maximize: list[bool]
