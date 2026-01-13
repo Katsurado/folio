@@ -40,7 +40,9 @@ def rgb_project():
             InputSpec("B", "continuous", bounds=(0.0, 255.0)),
         ],
         outputs=[OutputSpec("wavelength")],
-        target_configs=[TargetConfig(objective="wavelength", objective_mode="maximize")],
+        target_configs=[
+            TargetConfig(objective="wavelength", objective_mode="maximize")
+        ],
     )
 
 

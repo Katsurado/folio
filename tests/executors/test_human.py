@@ -9,6 +9,16 @@ from folio.core.schema import InputSpec, OutputSpec
 from folio.executors import HumanExecutor
 
 
+def make_mock_input(responses):
+    """Create a mock input function that returns responses in sequence."""
+    it = iter(responses)
+
+    def mock_input(prompt):
+        return next(it)
+
+    return mock_input
+
+
 @pytest.fixture
 def rgb_project():
     """Project with RGB inputs and wavelength output."""
@@ -21,7 +31,9 @@ def rgb_project():
             InputSpec("B", "continuous", bounds=(0.0, 255.0)),
         ],
         outputs=[OutputSpec("wavelength")],
-        target_configs=[TargetConfig(objective="wavelength", objective_mode="maximize")],
+        target_configs=[
+            TargetConfig(objective="wavelength", objective_mode="maximize")
+        ],
     )
 
 
@@ -47,7 +59,10 @@ class TestHumanExecutorInit:
 
     def test_custom_input_func(self):
         """HumanExecutor accepts custom input function."""
-        mock_input = lambda prompt: "42.0"
+
+        def mock_input(prompt):
+            return "42.0"
+
         executor = HumanExecutor(input_func=mock_input)
         assert executor.input_func is mock_input
 
@@ -58,8 +73,7 @@ class TestHumanExecutorRun:
     def test_run_collects_actual_inputs_and_outputs(self, rgb_project):
         """HumanExecutor collects actual inputs and outputs via input function."""
         # Sequence: R, G, B actual values, wavelength, failed, notes, tag
-        responses = iter(["100.0", "150.0", "200.0", "550.0", "n", "", ""])
-        mock_input = lambda prompt: next(responses)
+        mock_input = make_mock_input(["100.0", "150.0", "200.0", "550.0", "n", "", ""])
 
         executor = HumanExecutor(input_func=mock_input)
         suggestion = {"R": 100.0, "G": 150.0, "B": 200.0}
@@ -74,8 +88,7 @@ class TestHumanExecutorRun:
     def test_actual_inputs_can_differ_from_suggestion(self, rgb_project):
         """User can enter actual inputs different from suggested values."""
         # Actual values differ from suggestion
-        responses = iter(["105.0", "148.0", "202.0", "555.0", "n", "", ""])
-        mock_input = lambda prompt: next(responses)
+        mock_input = make_mock_input(["105.0", "148.0", "202.0", "555.0", "n", "", ""])
 
         executor = HumanExecutor(input_func=mock_input)
         suggestion = {"R": 100.0, "G": 150.0, "B": 200.0}
@@ -88,8 +101,7 @@ class TestHumanExecutorRun:
 
     def test_inputs_suggested_stores_original_suggestion(self, rgb_project):
         """Observation.inputs_suggested contains the original suggestion."""
-        responses = iter(["100.0", "150.0", "200.0", "550.0", "n", "", ""])
-        mock_input = lambda prompt: next(responses)
+        mock_input = make_mock_input(["100.0", "150.0", "200.0", "550.0", "n", "", ""])
 
         executor = HumanExecutor(input_func=mock_input)
         suggestion = {"R": 100.0, "G": 150.0, "B": 200.0}
@@ -101,8 +113,7 @@ class TestHumanExecutorRun:
     def test_run_multiple_outputs(self, multi_output_project):
         """HumanExecutor prompts for each output."""
         # Sequence: x actual, y1, y2, failed, notes, tag
-        responses = iter(["5.0", "1.5", "2.5", "n", "", ""])
-        mock_input = lambda prompt: next(responses)
+        mock_input = make_mock_input(["5.0", "1.5", "2.5", "n", "", ""])
 
         executor = HumanExecutor(input_func=mock_input)
         suggestion = {"x": 5.0}
@@ -114,8 +125,7 @@ class TestHumanExecutorRun:
 
     def test_run_marks_failed_experiment(self, rgb_project):
         """HumanExecutor can mark experiments as failed."""
-        responses = iter(["100.0", "150.0", "200.0", "550.0", "y", "", ""])
-        mock_input = lambda prompt: next(responses)
+        mock_input = make_mock_input(["100.0", "150.0", "200.0", "550.0", "y", "", ""])
 
         executor = HumanExecutor(input_func=mock_input)
         suggestion = {"R": 100.0, "G": 150.0, "B": 200.0}
@@ -127,8 +137,9 @@ class TestHumanExecutorRun:
     def test_failed_flag_yes_variations(self, rgb_project):
         """Various 'yes' responses mark experiment as failed."""
         for yes_response in ["y", "Y", "yes", "YES", "Yeah"]:
-            responses = iter(["100.0", "150.0", "200.0", "550.0", yes_response, "", ""])
-            mock_input = lambda prompt: next(responses)
+            mock_input = make_mock_input(
+                ["100.0", "150.0", "200.0", "550.0", yes_response, "", ""]
+            )
 
             executor = HumanExecutor(input_func=mock_input)
             result = executor.execute({"R": 100.0, "G": 150.0, "B": 200.0}, rgb_project)
@@ -138,8 +149,9 @@ class TestHumanExecutorRun:
     def test_failed_flag_no_variations(self, rgb_project):
         """Various 'no' responses do not mark experiment as failed."""
         for no_response in ["n", "N", "no", "NO", "nope", ""]:
-            responses = iter(["100.0", "150.0", "200.0", "550.0", no_response, "", ""])
-            mock_input = lambda prompt: next(responses)
+            mock_input = make_mock_input(
+                ["100.0", "150.0", "200.0", "550.0", no_response, "", ""]
+            )
 
             executor = HumanExecutor(input_func=mock_input)
             result = executor.execute({"R": 100.0, "G": 150.0, "B": 200.0}, rgb_project)
@@ -148,8 +160,9 @@ class TestHumanExecutorRun:
 
     def test_notes_are_captured(self, rgb_project):
         """Notes entered by user are stored in observation."""
-        responses = iter(["100.0", "150.0", "200.0", "550.0", "n", "Sample looked cloudy", ""])
-        mock_input = lambda prompt: next(responses)
+        mock_input = make_mock_input(
+            ["100.0", "150.0", "200.0", "550.0", "n", "Sample looked cloudy", ""]
+        )
 
         executor = HumanExecutor(input_func=mock_input)
         result = executor.execute({"R": 100.0, "G": 150.0, "B": 200.0}, rgb_project)
@@ -158,8 +171,7 @@ class TestHumanExecutorRun:
 
     def test_empty_notes_become_none(self, rgb_project):
         """Empty notes string becomes None."""
-        responses = iter(["100.0", "150.0", "200.0", "550.0", "n", "", ""])
-        mock_input = lambda prompt: next(responses)
+        mock_input = make_mock_input(["100.0", "150.0", "200.0", "550.0", "n", "", ""])
 
         executor = HumanExecutor(input_func=mock_input)
         result = executor.execute({"R": 100.0, "G": 150.0, "B": 200.0}, rgb_project)
@@ -168,8 +180,9 @@ class TestHumanExecutorRun:
 
     def test_whitespace_notes_become_none(self, rgb_project):
         """Whitespace-only notes become None."""
-        responses = iter(["100.0", "150.0", "200.0", "550.0", "n", "   ", ""])
-        mock_input = lambda prompt: next(responses)
+        mock_input = make_mock_input(
+            ["100.0", "150.0", "200.0", "550.0", "n", "   ", ""]
+        )
 
         executor = HumanExecutor(input_func=mock_input)
         result = executor.execute({"R": 100.0, "G": 150.0, "B": 200.0}, rgb_project)
@@ -178,8 +191,9 @@ class TestHumanExecutorRun:
 
     def test_tag_is_captured(self, rgb_project):
         """Tag entered by user is stored in observation."""
-        responses = iter(["100.0", "150.0", "200.0", "550.0", "n", "", "screening"])
-        mock_input = lambda prompt: next(responses)
+        mock_input = make_mock_input(
+            ["100.0", "150.0", "200.0", "550.0", "n", "", "screening"]
+        )
 
         executor = HumanExecutor(input_func=mock_input)
         result = executor.execute({"R": 100.0, "G": 150.0, "B": 200.0}, rgb_project)
@@ -188,8 +202,7 @@ class TestHumanExecutorRun:
 
     def test_empty_tag_becomes_none(self, rgb_project):
         """Empty tag string becomes None."""
-        responses = iter(["100.0", "150.0", "200.0", "550.0", "n", "", ""])
-        mock_input = lambda prompt: next(responses)
+        mock_input = make_mock_input(["100.0", "150.0", "200.0", "550.0", "n", "", ""])
 
         executor = HumanExecutor(input_func=mock_input)
         result = executor.execute({"R": 100.0, "G": 150.0, "B": 200.0}, rgb_project)
@@ -198,8 +211,7 @@ class TestHumanExecutorRun:
 
     def test_observation_has_correct_project_id(self, rgb_project):
         """Returned observation has project_id from passed project."""
-        responses = iter(["100.0", "150.0", "200.0", "550.0", "n", "", ""])
-        mock_input = lambda prompt: next(responses)
+        mock_input = make_mock_input(["100.0", "150.0", "200.0", "550.0", "n", "", ""])
 
         executor = HumanExecutor(input_func=mock_input)
         result = executor.execute({"R": 100.0, "G": 150.0, "B": 200.0}, rgb_project)
@@ -208,8 +220,7 @@ class TestHumanExecutorRun:
 
     def test_observation_has_no_database_id(self, rgb_project):
         """Returned observation has id=None (DB assigns on persist)."""
-        responses = iter(["100.0", "150.0", "200.0", "550.0", "n", "", ""])
-        mock_input = lambda prompt: next(responses)
+        mock_input = make_mock_input(["100.0", "150.0", "200.0", "550.0", "n", "", ""])
 
         executor = HumanExecutor(input_func=mock_input)
         result = executor.execute({"R": 100.0, "G": 150.0, "B": 200.0}, rgb_project)
@@ -223,8 +234,9 @@ class TestHumanExecutorInputValidation:
     def test_empty_input_retries(self, rgb_project, capsys):
         """Empty input for actual value triggers retry."""
         # First R is empty, then valid; rest are valid
-        responses = iter(["", "100.0", "150.0", "200.0", "550.0", "n", "", ""])
-        mock_input = lambda prompt: next(responses)
+        mock_input = make_mock_input(
+            ["", "100.0", "150.0", "200.0", "550.0", "n", "", ""]
+        )
 
         executor = HumanExecutor(input_func=mock_input)
         result = executor.execute({"R": 100.0, "G": 150.0, "B": 200.0}, rgb_project)
@@ -236,8 +248,9 @@ class TestHumanExecutorInputValidation:
     def test_invalid_number_input_retries(self, rgb_project, capsys):
         """Non-numeric input triggers retry with error message."""
         # First R is invalid, then valid
-        responses = iter(["abc", "100.0", "150.0", "200.0", "550.0", "n", "", ""])
-        mock_input = lambda prompt: next(responses)
+        mock_input = make_mock_input(
+            ["abc", "100.0", "150.0", "200.0", "550.0", "n", "", ""]
+        )
 
         executor = HumanExecutor(input_func=mock_input)
         result = executor.execute({"R": 100.0, "G": 150.0, "B": 200.0}, rgb_project)
@@ -249,8 +262,9 @@ class TestHumanExecutorInputValidation:
     def test_empty_output_retries(self, rgb_project, capsys):
         """Empty output value triggers retry."""
         # wavelength is empty first, then valid
-        responses = iter(["100.0", "150.0", "200.0", "", "550.0", "n", "", ""])
-        mock_input = lambda prompt: next(responses)
+        mock_input = make_mock_input(
+            ["100.0", "150.0", "200.0", "", "550.0", "n", "", ""]
+        )
 
         executor = HumanExecutor(input_func=mock_input)
         result = executor.execute({"R": 100.0, "G": 150.0, "B": 200.0}, rgb_project)
@@ -262,8 +276,9 @@ class TestHumanExecutorInputValidation:
     def test_invalid_number_output_retries(self, rgb_project, capsys):
         """Non-numeric output triggers retry with error message."""
         # wavelength is invalid first, then valid
-        responses = iter(["100.0", "150.0", "200.0", "not_a_number", "550.0", "n", "", ""])
-        mock_input = lambda prompt: next(responses)
+        mock_input = make_mock_input(
+            ["100.0", "150.0", "200.0", "not_a_number", "550.0", "n", "", ""]
+        )
 
         executor = HumanExecutor(input_func=mock_input)
         result = executor.execute({"R": 100.0, "G": 150.0, "B": 200.0}, rgb_project)
@@ -275,8 +290,9 @@ class TestHumanExecutorInputValidation:
     def test_multiple_retries_before_valid_input(self, rgb_project, capsys):
         """Multiple invalid attempts followed by valid input."""
         # R: empty, invalid, valid; rest normal
-        responses = iter(["", "abc", "100.0", "150.0", "200.0", "550.0", "n", "", ""])
-        mock_input = lambda prompt: next(responses)
+        mock_input = make_mock_input(
+            ["", "abc", "100.0", "150.0", "200.0", "550.0", "n", "", ""]
+        )
 
         executor = HumanExecutor(input_func=mock_input)
         result = executor.execute({"R": 100.0, "G": 150.0, "B": 200.0}, rgb_project)
@@ -288,11 +304,12 @@ class TestHumanExecutorInputValidation:
 
     def test_whitespace_input_treated_as_empty(self, rgb_project, capsys):
         """Whitespace-only input is treated as empty and triggers retry."""
-        responses = iter(["   ", "100.0", "150.0", "200.0", "550.0", "n", "", ""])
-        mock_input = lambda prompt: next(responses)
+        mock_input = make_mock_input(
+            ["   ", "100.0", "150.0", "200.0", "550.0", "n", "", ""]
+        )
 
         executor = HumanExecutor(input_func=mock_input)
-        result = executor.execute({"R": 100.0, "G": 150.0, "B": 200.0}, rgb_project)
+        executor.execute({"R": 100.0, "G": 150.0, "B": 200.0}, rgb_project)
 
         captured = capsys.readouterr()
         assert "actual inputs" in captured.out.lower()

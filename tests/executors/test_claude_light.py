@@ -11,6 +11,8 @@ from folio.core.schema import InputSpec, OutputSpec
 from folio.exceptions import ExecutorError
 from folio.executors import ClaudeLightExecutor
 
+PATCH_TARGET = "folio.executors.claude_light.requests.get"
+
 
 @pytest.fixture
 def rgb_project():
@@ -24,7 +26,9 @@ def rgb_project():
             InputSpec("B", "continuous", bounds=(0.0, 255.0)),
         ],
         outputs=[OutputSpec("wavelength")],
-        target_configs=[TargetConfig(objective="wavelength", objective_mode="maximize")],
+        target_configs=[
+            TargetConfig(objective="wavelength", objective_mode="maximize")
+        ],
     )
 
 
@@ -56,7 +60,7 @@ class TestClaudeLightExecutorRun:
         mock_response = Mock()
         mock_response.json.return_value = make_api_response(100.0, 150.0, 200.0, 550.0)
 
-        with patch("folio.executors.claude_light.requests.get", return_value=mock_response) as mock_get:
+        with patch(PATCH_TARGET, return_value=mock_response) as mock_get:
             executor = ClaudeLightExecutor()
             suggestion = {"R": 100.0, "G": 150.0, "B": 200.0}
 
@@ -71,7 +75,7 @@ class TestClaudeLightExecutorRun:
         mock_response = Mock()
         mock_response.json.return_value = make_api_response(100.0, 150.0, 200.0, 550.0)
 
-        with patch("folio.executors.claude_light.requests.get", return_value=mock_response) as mock_get:
+        with patch(PATCH_TARGET, return_value=mock_response) as mock_get:
             executor = ClaudeLightExecutor()
             suggestion = {"R": 100.0, "G": 150.0, "B": 200.0}
 
@@ -87,7 +91,7 @@ class TestClaudeLightExecutorRun:
         mock_response = Mock()
         mock_response.json.return_value = make_api_response(102.0, 148.0, 201.0, 550.0)
 
-        with patch("folio.executors.claude_light.requests.get", return_value=mock_response):
+        with patch(PATCH_TARGET, return_value=mock_response):
             executor = ClaudeLightExecutor()
             suggestion = {"R": 100.0, "G": 150.0, "B": 200.0}
 
@@ -101,7 +105,7 @@ class TestClaudeLightExecutorRun:
         mock_response = Mock()
         mock_response.json.return_value = make_api_response(102.0, 148.0, 201.0, 550.0)
 
-        with patch("folio.executors.claude_light.requests.get", return_value=mock_response):
+        with patch(PATCH_TARGET, return_value=mock_response):
             executor = ClaudeLightExecutor()
             suggestion = {"R": 100.0, "G": 150.0, "B": 200.0}
 
@@ -114,7 +118,7 @@ class TestClaudeLightExecutorRun:
         mock_response = Mock()
         mock_response.json.return_value = make_api_response(100.0, 150.0, 200.0, 550.0)
 
-        with patch("folio.executors.claude_light.requests.get", return_value=mock_response):
+        with patch(PATCH_TARGET, return_value=mock_response):
             executor = ClaudeLightExecutor()
             suggestion = {"R": 100.0, "G": 150.0, "B": 200.0}
 
@@ -127,7 +131,7 @@ class TestClaudeLightExecutorRun:
         mock_response = Mock()
         mock_response.json.return_value = make_api_response(100.0, 150.0, 200.0, 550.0)
 
-        with patch("folio.executors.claude_light.requests.get", return_value=mock_response):
+        with patch(PATCH_TARGET, return_value=mock_response):
             executor = ClaudeLightExecutor()
             suggestion = {"R": 100.0, "G": 150.0, "B": 200.0}
 
@@ -142,7 +146,7 @@ class TestClaudeLightExecutorRun:
 
         custom_url = "https://custom.api/endpoint"
 
-        with patch("folio.executors.claude_light.requests.get", return_value=mock_response) as mock_get:
+        with patch(PATCH_TARGET, return_value=mock_response) as mock_get:
             executor = ClaudeLightExecutor(api_url=custom_url)
             suggestion = {"R": 100.0, "G": 150.0, "B": 200.0}
 
@@ -157,7 +161,7 @@ class TestClaudeLightExecutorRun:
         mock_response = Mock()
         mock_response.json.return_value = make_api_response(100.0, 150.0, 200.0, 550.0)
 
-        with patch("folio.executors.claude_light.requests.get", return_value=mock_response):
+        with patch(PATCH_TARGET, return_value=mock_response):
             executor = ClaudeLightExecutor()
             suggestion = {"R": 100.0, "G": 150.0, "B": 200.0}
 
@@ -177,7 +181,7 @@ class TestClaudeLightExecutorErrorHandling:
 
     def test_api_connection_error_raises_executor_error(self, rgb_project):
         """ClaudeLightExecutor raises ExecutorError on connection failure."""
-        with patch("folio.executors.claude_light.requests.get") as mock_get:
+        with patch(PATCH_TARGET) as mock_get:
             mock_get.side_effect = Exception("Connection failed")
 
             executor = ClaudeLightExecutor()
@@ -193,7 +197,7 @@ class TestClaudeLightExecutorErrorHandling:
         mock_response = Mock()
         mock_response.json.side_effect = req.HTTPError("404 Not Found")
 
-        with patch("folio.executors.claude_light.requests.get", return_value=mock_response):
+        with patch(PATCH_TARGET, return_value=mock_response):
             executor = ClaudeLightExecutor()
             suggestion = {"R": 100.0, "G": 150.0, "B": 200.0}
 
@@ -205,7 +209,7 @@ class TestClaudeLightExecutorErrorHandling:
         mock_response = Mock()
         mock_response.json.side_effect = ValueError("Invalid JSON")
 
-        with patch("folio.executors.claude_light.requests.get", return_value=mock_response):
+        with patch(PATCH_TARGET, return_value=mock_response):
             executor = ClaudeLightExecutor()
             suggestion = {"R": 100.0, "G": 150.0, "B": 200.0}
 
@@ -218,7 +222,7 @@ class TestClaudeLightExecutorErrorHandling:
         # Missing "in" field
         mock_response.json.return_value = {"out": {"wavelength": 550.0}}
 
-        with patch("folio.executors.claude_light.requests.get", return_value=mock_response):
+        with patch(PATCH_TARGET, return_value=mock_response):
             executor = ClaudeLightExecutor()
             suggestion = {"R": 100.0, "G": 150.0, "B": 200.0}
 
