@@ -1,5 +1,6 @@
 """Active learning acquisition function implementations."""
 
+import torch
 from botorch.acquisition import AcquisitionFunction
 from botorch.models.model import Model
 from torch import Tensor
@@ -63,19 +64,13 @@ class _PosteriorVarianceAcquisition(AcquisitionFunction):
         ------
         ValueError
             If X is not torch.float64.
-
-        Notes
-        -----
-        Implementation steps:
-
-        1. Get posterior from model: posterior = self.model.posterior(X)
-        2. Extract variance: variance = posterior.variance
-           - Single-output: shape (batch, q, 1)
-           - Multi-output: shape (batch, q, n_outputs)
-        3. Sum over output dimension: variance.sum(dim=-1) -> shape (batch, q)
-        4. Sum over q dimension: .sum(dim=-1) -> shape (batch,)
         """
-        raise NotImplementedError
+        if X.dtype != torch.float64:
+            raise ValueError(f"X must be torch.float64, got {X.dtype}")
+
+        posterior = self.model.posterior(X)
+        var = posterior.variance
+        return torch.sum(var, (-2, -1))
 
 
 class PosteriorVariance(ActiveLearningAcquisition):

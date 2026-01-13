@@ -261,17 +261,6 @@ class _UCBAcquisition(AcquisitionFunction):
         ------
         ValueError
             If X is not torch.float64.
-
-        Notes
-        -----
-        Implementation steps:
-
-        1. Get posterior: posterior = self.model.posterior(X)
-        2. Extract mean and std (squeeze last dim for single-output)
-        3. Compute UCB:
-           - maximize: ucb = mean + beta * std
-           - minimize: ucb = -mean + beta * std
-        4. Sum over q dimension: return ucb.sum(dim=-1)
         """
         if X.dtype != torch.float64:
             raise ValueError(f"X must be torch.float64, got {X.dtype}")
