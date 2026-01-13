@@ -335,40 +335,52 @@ with pytest.raises(ValueError, match="Array shapes must match exactly"):
 
 ## Current State
 
+### Completed (MVP Core)
+
 - [x] Project skeleton
 - [x] Data layer (Project, Observation, SQLite CRUD)
-  - [x] Schema: InputSpec, OutputSpec, ConstantSpec with validation
-  - [x] Observation with validation, timestamp default, failed flag
+  - [x] Schema: InputSpec, OutputSpec with validation
+  - [x] Observation with validation, timestamp default, tag, notes
   - [x] Project with target_configs (list), reference_point, recommender_config
   - [x] Project.is_multi_objective() for single vs multi-objective detection
-  - [x] Database: create/get/delete project, add/get observations
+  - [x] Database: create/get/delete project, add/get/delete observations
   - [x] Project.get_training_data() extracts (X, y) arrays from observations
 - [x] Target interface
   - [x] ScalarTarget ABC, DirectTarget, DerivedTarget, RatioTarget, DifferenceTarget, DistanceTarget, SlopeTarget
 - [x] Surrogate interface
   - [x] Surrogate ABC with fit/predict
-  - [x] SingleTaskGPSurrogate: BoTorch single-output GP, y shape (n, 1)
+  - [x] SingleTaskGPSurrogate: BoTorch single-output GP
   - [x] MultiTaskGPSurrogate: BoTorch multi-output GP with ICM kernel
   - [x] TaskStandardize: per-task outcome transform for multi-objective scale balancing
 - [x] Acquisition interface (BoTorch-compatible)
   - [x] Single-objective: ExpectedImprovement, UpperConfidenceBound
   - [x] Multi-objective: NEHVI (qLogNoisyExpectedHypervolumeImprovement)
-  - [ ] ParEGO (not yet implemented)
 - [x] Recommender interface
   - [x] Recommender ABC with recommend() and recommend_from_data()
   - [x] RandomRecommender: uniform sampling within bounds
-  - [x] BayesianRecommender: GP surrogate + acquisition optimization, surrogate property for state access
+  - [x] BayesianRecommender: GP surrogate + acquisition optimization
 - [x] Folio API (high-level user interface)
   - [x] Project CRUD: create_project, list_projects, delete_project, get_project
   - [x] Observation CRUD: add_observation, delete_observation, get_observations (with tag filter)
   - [x] Recommendation: suggest() returns list[dict] for batch support
   - [x] Recommender caching: _recommenders dict, _build_recommender, get_recommender
+- [x] Demos (AI-generated, synthetic data)
+  - [x] Quickstart, multi-objective, lab workflow, edge cases
+  - [x] Custom surrogates/acquisitions/recommenders demo
+  - [x] Quarto report templates (polymer optimization, iridium sensor)
+  - [x] Custom target extensions (R2Target, SternVolmerTargets)
+- [x] CI/CD
+  - [x] Cross-platform testing (Ubuntu, macOS, Windows)
+  - [x] Pre-commit hooks (black, ruff, nbstripout)
+
+### Not Yet Implemented
+
 - [ ] Add images field to Observation
 - [ ] Add procedure, hazards fields to Project
 - [ ] libSQL cloud sync support in Database
 - [ ] GridRecommender
+- [ ] ParEGO acquisition function
 - [ ] Executor interface (HumanExecutor, ClaudeLightExecutor)
-- [ ] Export to PDF via Quarto
 - [ ] Streamlit UI
 
 ## Commands
