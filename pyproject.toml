@@ -63,6 +63,7 @@ line-length = 88
 select = ["E", "F", "I", "N", "W", "UP"]
 ignore = ["E501"]
 target-version = "py310"
+exclude = ["demos"]
 
 [tool.ruff.isort]
 known-first-party = ["folio"]
@@ -70,6 +71,7 @@ known-first-party = ["folio"]
 [tool.black]
 line-length = 88
 target-version = ["py310"]
+exclude = "demos"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

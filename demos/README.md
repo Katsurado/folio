@@ -4,11 +4,11 @@
 
 ## Contents
 
-- `01_basic_usage.ipynb` - Introduction to Folio's core features
-- `02_single_objective.ipynb` - Single-objective Bayesian optimization
-- `03_multi_objective.ipynb` - Multi-objective optimization with Pareto fronts
-- `04_custom_targets.ipynb` - Creating custom optimization targets
-- `05_polymer_optimization.ipynb` - Full workflow example (Jupyter)
+- `01_quickstart.ipynb` - Introduction to Folio's core features
+- `02_multi_objective.ipynb` - Multi-objective optimization with Pareto fronts
+- `03_lab_workflow.ipynb` - Realistic lab workflow example
+- `04_edge_cases.ipynb` - Edge cases and error handling
+- `05_polymer_optimization.ipynb` - Full polymer optimization workflow (Jupyter)
 - `06_extending_folio.ipynb` - Custom surrogates, acquisitions, and recommenders
 - `07_polymer_optimization_quarto/` - Quarto version of polymer optimization demo
 - `08_experiment_report/` - Publication-ready report template with LaTeX features
