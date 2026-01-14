@@ -1,6 +1,7 @@
 """High-level API for Folio electronic lab notebook."""
 
 import logging
+import time
 from pathlib import Path
 
 from folio.core import database
@@ -9,7 +10,7 @@ from folio.core.database import DEFAULT_DB_PATH
 from folio.core.observation import Observation
 from folio.core.project import Project
 from folio.core.schema import InputSpec, OutputSpec
-from folio.exceptions import ExecutorError  # noqa: F401 (used in implementation)
+from folio.exceptions import ExecutorError
 from folio.executors import ClaudeLightExecutor, Executor, HumanExecutor
 from folio.recommenders import BayesianRecommender, RandomRecommender, Recommender
 
@@ -66,19 +67,32 @@ class Folio:
     >>> folio = Folio(db_path="./my_experiments.db")
     """
 
-    def __init__(self, db_path: Path | str = DEFAULT_DB_PATH) -> None:
-        """Initialize Folio with database path.
+    def __init__(
+        self,
+        db_path: Path | str = DEFAULT_DB_PATH,
+        sync_url: str | None = None,
+        auth_token: str | None = None,
+    ) -> None:
+        """Initialize Folio with database path and optional cloud sync.
 
         Parameters
         ----------
         db_path : Path | str, optional
             Path to the SQLite database file. Defaults to ~/.folio/folio.db.
             Will be converted to Path if string is provided.
+        sync_url : str, optional
+            libSQL sync URL for cloud synchronization (e.g., libsql://your-db.turso.io).
+            If provided, enables cloud sync for collaborative workflows.
+        auth_token : str, optional
+            Authentication token for libSQL cloud sync. Required if sync_url
+            is provided.
         """
         self.db_path = Path(db_path) if isinstance(db_path, str) else db_path
+        self.sync_url = sync_url
+        self.auth_token = auth_token
         self._recommenders: dict[str, Recommender] = {}
         self.executor: Executor | None = None
-        database.init_db(self.db_path)
+        database.init_db(self.db_path, sync_url=sync_url, auth_token=auth_token)
 
     def create_project(
         self,
@@ -155,7 +169,9 @@ class Folio:
             recommender_config=recommender_config,
         )
 
-        database.create_project(project, self.db_path)
+        database.create_project(
+            project, self.db_path, sync_url=self.sync_url, auth_token=self.auth_token
+        )
 
     def list_projects(self) -> list[str]:
         """List all project names in the database.
@@ -170,7 +186,9 @@ class Folio:
         >>> folio.list_projects()
         ['optimization_v1', 'screening', 'yield_optimization']
         """
-        return database.list_projects(self.db_path)
+        return database.list_projects(
+            self.db_path, sync_url=self.sync_url, auth_token=self.auth_token
+        )
 
     def delete_project(self, name: str) -> None:
         """Delete a project and all its observations.
@@ -199,7 +217,9 @@ class Folio:
         """
         if self._recommenders.get(name) is not None:
             self._recommenders.pop(name)
-        database.delete_project(name, self.db_path)
+        database.delete_project(
+            name, self.db_path, sync_url=self.sync_url, auth_token=self.auth_token
+        )
 
     def add_observation(
         self,
@@ -249,14 +269,21 @@ class Folio:
         ...     notes="Excellent result, consider replicating",
         ... )
         """
-        project = database.get_project(project_name, self.db_path)
+        project = database.get_project(
+            project_name,
+            self.db_path,
+            sync_url=self.sync_url,
+            auth_token=self.auth_token,
+        )
         project_id = project.id
         project.validate_inputs(inputs)
         project.validate_outputs(outputs)
         obs = Observation(
             project_id=project_id, inputs=inputs, outputs=outputs, tag=tag, notes=notes
         )
-        database.add_observation(obs, self.db_path)
+        database.add_observation(
+            obs, self.db_path, sync_url=self.sync_url, auth_token=self.auth_token
+        )
 
     def delete_observation(self, observation_id: int) -> None:
         """Delete an observation by its database ID.
@@ -275,7 +302,12 @@ class Folio:
         --------
         >>> folio.delete_observation(42)
         """
-        database.delete_observation(observation_id, self.db_path)
+        database.delete_observation(
+            observation_id,
+            self.db_path,
+            sync_url=self.sync_url,
+            auth_token=self.auth_token,
+        )
 
     def suggest(self, project_name: str) -> list[dict[str, float]]:
         """Get suggested next experiment inputs for a project.
@@ -347,7 +379,9 @@ class Folio:
         >>> print(project.inputs)
         [InputSpec(name='temperature', type='continuous', bounds=(20.0, 100.0))]
         """
-        return database.get_project(name, self.db_path)
+        return database.get_project(
+            name, self.db_path, sync_url=self.sync_url, auth_token=self.auth_token
+        )
 
     def get_observations(
         self,
@@ -384,9 +418,19 @@ class Folio:
 
         >>> screening = folio.get_observations("yield_optimization", tag="screening")
         """
-        project = database.get_project(project_name, self.db_path)
+        project = database.get_project(
+            project_name,
+            self.db_path,
+            sync_url=self.sync_url,
+            auth_token=self.auth_token,
+        )
         project_id = project.id
-        observations = database.get_observations(project_id, self.db_path)
+        observations = database.get_observations(
+            project_id,
+            self.db_path,
+            sync_url=self.sync_url,
+            auth_token=self.auth_token,
+        )
         if tag is not None:
             return [obs for obs in observations if obs.tag == tag]
         return observations
@@ -490,7 +534,13 @@ class Folio:
         >>> folio.build_executor("claude_light")
         >>> folio.execute("my_project", n_iter=5)  # Uses cached executor
         """
-        raise NotImplementedError
+        try:
+            cls = _EXECUTOR_REGISTRY[executor_name]
+        except KeyError:
+            raise ValueError(f"Unknown executor: {executor_name}")
+
+        self.executor = cls()
+        return self.executor
 
     def execute(
         self,
@@ -566,4 +616,31 @@ class Folio:
         3. Call `add_observation()` to record the result
         4. Sleep for `wait_between_runs` seconds (if > 0)
         """
-        raise NotImplementedError
+        if self.executor is None and executor is None:
+            raise ExecutorError("Executor is not configured")
+
+        project = self.get_project(project_name)
+
+        active_executor = self.executor if executor is None else executor
+
+        observations = []
+
+        for iteration in range(n_iter):
+            suggestion = self.suggest(project_name)[0]
+            try:
+                next_obs = active_executor.execute(suggestion, project)
+            except ExecutorError as e:
+                if stop_on_error:
+                    raise ExecutorError(f"{e}")
+                else:
+                    continue
+            database.add_observation(
+                next_obs,
+                self.db_path,
+                sync_url=self.sync_url,
+                auth_token=self.auth_token,
+            )
+            observations.append(next_obs)
+            time.sleep(wait_between_runs)
+
+        return observations

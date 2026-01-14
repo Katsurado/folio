@@ -900,7 +900,7 @@ class TestExecute:
         """execute() with no executor raises ExecutorError."""
         assert folio.executor is None
 
-        with pytest.raises(ExecutorError, match="(?i)no executor|executor.*none"):
+        with pytest.raises(ExecutorError, match="(?i)no executor|not configured"):
             folio.execute(project_with_observations)
 
     def test_execute_uses_passed_executor(
