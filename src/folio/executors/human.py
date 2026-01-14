@@ -4,6 +4,7 @@ from collections.abc import Callable
 
 from folio.core.observation import Observation
 from folio.core.project import Project
+from folio.exceptions import ExecutorError
 from folio.executors.base import Executor
 
 
@@ -48,6 +49,7 @@ class HumanExecutor(Executor):
             Observation with user-entered outputs and failed flag.
         """
         print(f"Suggested inputs: {suggestion}")
+        print("(Enter 'quit' at any input or output prompt to stop)")
 
         actual_input = {}
         output = {}
@@ -61,6 +63,8 @@ class HumanExecutor(Executor):
                     # user just hit enter, yell at them
                     print("You always need to record the actual inputs")
                     continue
+                elif raw == "quit":
+                    raise ExecutorError("quitted")
                 else:
                     try:
                         actual_input[name] = float(raw)
@@ -76,6 +80,8 @@ class HumanExecutor(Executor):
                     # user just hit enter, yell at them
                     print("You always need to record the actual outputs")
                     continue
+                elif raw == "quit":
+                    raise ExecutorError("quitted")
                 else:
                     try:
                         output[output_spec.name] = float(raw)

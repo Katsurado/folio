@@ -168,23 +168,47 @@ Note: `targets/` uses `TYPE_CHECKING` for `Observation` imports to avoid circula
 
 ## Executor Interface
 
+Executors bridge Folio's suggestions and actual experiment execution. The base class provides validation and error handling; subclasses implement `_run()`.
+
 ```python
 class Executor(ABC):
+    def execute(self, suggestion: dict, project: Project) -> Observation:
+        """Validate inputs and run experiment."""
+        # Validates suggestion against project schema, then calls _run()
+
     @abstractmethod
-    def run(self, inputs: dict) -> dict:
-        """Run experiment, return outputs."""
+    def _run(self, suggestion: dict, project: Project) -> Observation:
+        """Subclass implements actual experiment execution."""
 
 class HumanExecutor(Executor):
-    def run(self, inputs):
-        # Display to user, wait for manual entry
+    """Prompts user for actual inputs and outputs via CLI."""
 
 class ClaudeLightExecutor(Executor):
-    def __init__(self, api_url):
+    """Calls Claude-Light API for autonomous closed-loop experiments."""
+    def __init__(self, api_url: str = "https://claude-light.cheme.cmu.edu/api"):
         self.api_url = api_url
+```
 
-    def run(self, inputs):
-        res = requests.get(self.api_url, params=inputs)
-        return res.json()["out"]
+### Using Executors with Folio
+
+```python
+from folio.executors import HumanExecutor, ClaudeLightExecutor
+
+# Manual experiments
+folio.build_executor("human")
+observations = folio.execute("my_project", n_iter=5)
+
+# Autonomous closed-loop
+folio.build_executor("claude_light")
+observations = folio.execute("my_project", n_iter=20, stop_on_error=False)
+
+# Custom executor
+class MyRobotExecutor(Executor):
+    def _run(self, suggestion, project):
+        # Call robot API...
+        return Observation(project_id=project.id, inputs=..., outputs=...)
+
+observations = folio.execute("my_project", n_iter=10, executor=MyRobotExecutor())
 ```
 
 ## Database Configuration
@@ -364,11 +388,21 @@ with pytest.raises(ValueError, match="Array shapes must match exactly"):
   - [x] Observation CRUD: add_observation, delete_observation, get_observations (with tag filter)
   - [x] Recommendation: suggest() returns list[dict] for batch support
   - [x] Recommender caching: _recommenders dict, _build_recommender, get_recommender
+  - [x] Executor support: build_executor(), execute() for automated loops
+- [x] libSQL cloud sync support in Database
+  - [x] sync_url and auth_token parameters throughout database layer
+  - [x] Folio.__init__ accepts sync_url and auth_token
+  - [x] conn.sync() called after commits for cloud sync
+- [x] Executor interface
+  - [x] Executor ABC with execute() and _run()
+  - [x] HumanExecutor: interactive CLI prompts for manual experiments
+  - [x] ClaudeLightExecutor: autonomous closed-loop via API
 - [x] Demos (AI-generated, synthetic data)
   - [x] Quickstart, multi-objective, lab workflow, edge cases
   - [x] Custom surrogates/acquisitions/recommenders demo
   - [x] Quarto report templates (polymer optimization, iridium sensor)
   - [x] Custom target extensions (R2Target, SternVolmerTargets)
+  - [x] Executors demo (automated closed-loop optimization)
 - [x] CI/CD
   - [x] Cross-platform testing (Ubuntu, macOS, Windows)
   - [x] Pre-commit hooks (black, ruff, nbstripout)
@@ -377,10 +411,8 @@ with pytest.raises(ValueError, match="Array shapes must match exactly"):
 
 - [ ] Add images field to Observation
 - [ ] Add procedure, hazards fields to Project
-- [ ] libSQL cloud sync support in Database
 - [ ] GridRecommender
 - [ ] ParEGO acquisition function
-- [ ] Executor interface (HumanExecutor, ClaudeLightExecutor)
 - [ ] Streamlit UI
 
 ## Commands

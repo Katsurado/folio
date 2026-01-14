@@ -14,8 +14,10 @@ Record results → Folio suggests next experiment → Run it → Repeat
 
 - **Simple data entry**: Python API (Streamlit GUI coming soon)
 - **Smart suggestions**: Bayesian optimization (single and multi-objective)
+- **Closed-loop automation**: Executors for human-in-the-loop or fully autonomous experiments
+- **Cloud sync**: libSQL support for distributed collaboration
 - **Flexible**: Define your own inputs, outputs, and optimization targets
-- **Extensible**: Plug in custom surrogates, acquisition functions, and recommenders
+- **Extensible**: Plug in custom surrogates, acquisition functions, recommenders, and executors
 
 ## Installation
 
@@ -66,6 +68,37 @@ suggestions = folio.suggest("suzuki_coupling")
 print(suggestions[0])
 # {"temperature": 95.2, "catalyst_loading": 0.03, "solvent": "DMF"}
 ```
+
+## Automated Optimization
+
+Use executors to automate the experiment loop:
+
+```python
+from folio.executors import Executor
+from folio.core.observation import Observation
+
+# Create a custom executor (e.g., for simulation or robot API)
+class SimulatorExecutor(Executor):
+    def _run(self, suggestion, project):
+        # Run your experiment here
+        outputs = {"yield": simulate_reaction(**suggestion)}
+        return Observation(
+            project_id=project.id,
+            inputs=suggestion,
+            outputs=outputs,
+        )
+
+# Run 20 automated iterations
+observations = folio.execute(
+    project_name="suzuki_coupling",
+    n_iter=20,
+    executor=SimulatorExecutor(),
+)
+```
+
+Built-in executors:
+- `HumanExecutor`: Interactive CLI prompts for manual experiments
+- `ClaudeLightExecutor`: Fully autonomous via Claude-Light API
 
 ## Demos
 
