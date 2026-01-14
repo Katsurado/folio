@@ -1,20 +1,24 @@
 """Tests for Folio high-level API."""
 
 import gc
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from folio.api import Folio
 from folio.core.config import RecommenderConfig, TargetConfig
+from folio.core.observation import Observation
 from folio.core.project import Project
 from folio.core.schema import InputSpec, OutputSpec
 from folio.exceptions import (
+    ExecutorError,
     InvalidInputError,
     InvalidOutputError,
     InvalidSchemaError,
     ProjectExistsError,
     ProjectNotFoundError,
 )
+from folio.executors import ClaudeLightExecutor, Executor, HumanExecutor
 from folio.recommenders.base import Recommender
 from folio.recommenders.bayesian import BayesianRecommender
 from folio.recommenders.random import RandomRecommender
@@ -804,3 +808,535 @@ class TestFullWorkflow:
         # 5. Verify bounds are respected
         assert 20.0 <= suggestion[0]["temperature"] <= 100.0
         assert 1.0 <= suggestion[0]["pressure"] <= 10.0
+
+
+# =============================================================================
+# Executor Tests
+# =============================================================================
+
+
+class TestBuildExecutor:
+    """Tests for Folio.build_executor()."""
+
+    def test_build_executor_human(self, folio):
+        """Build a HumanExecutor by name."""
+        executor = folio.build_executor("human")
+
+        assert isinstance(executor, HumanExecutor)
+        assert folio.executor is executor
+
+    def test_build_executor_claude_light(self, folio):
+        """Build a ClaudeLightExecutor by name."""
+        executor = folio.build_executor("claude_light")
+
+        assert isinstance(executor, ClaudeLightExecutor)
+        assert folio.executor is executor
+
+    def test_build_executor_caches_in_self(self, folio):
+        """build_executor caches the executor in self.executor."""
+        assert folio.executor is None
+
+        executor = folio.build_executor("human")
+
+        assert folio.executor is not None
+        assert folio.executor is executor
+
+    def test_build_executor_replaces_previous(self, folio):
+        """Building a new executor replaces the previously cached one."""
+        first_executor = folio.build_executor("human")
+        second_executor = folio.build_executor("claude_light")
+
+        assert folio.executor is second_executor
+        assert folio.executor is not first_executor
+
+    def test_build_executor_unknown_name_raises(self, folio):
+        """Building an executor with unknown name raises ValueError."""
+        with pytest.raises(ValueError, match="(?i)unknown|invalid|not found"):
+            folio.build_executor("nonexistent_executor")
+
+    def test_build_executor_returns_executor(self, folio):
+        """build_executor returns an Executor instance."""
+        executor = folio.build_executor("human")
+
+        assert isinstance(executor, Executor)
+
+
+class TestExecute:
+    """Tests for Folio.execute()."""
+
+    @pytest.fixture
+    def project_with_observations(
+        self, folio, sample_inputs, sample_outputs, sample_target_configs
+    ):
+        """Create a project with some initial observations for testing."""
+        folio.create_project(
+            name="execute_test",
+            inputs=sample_inputs,
+            outputs=sample_outputs,
+            target_configs=sample_target_configs,
+        )
+        # Add a couple of initial observations so suggest() has data
+        for i in range(3):
+            folio.add_observation(
+                project_name="execute_test",
+                inputs={"temperature": 40.0 + i * 20, "pressure": 3.0 + i * 2},
+                outputs={"yield": 70.0 + i * 5, "purity": 90.0 + i * 2},
+            )
+        return "execute_test"
+
+    @pytest.fixture
+    def mock_executor(self):
+        """Create a mock executor for testing."""
+        mock = MagicMock(spec=Executor)
+        # The execute method returns an Observation
+        mock.execute.return_value = Observation(
+            project_id=1,
+            inputs={"temperature": 50.0, "pressure": 5.0},
+            outputs={"yield": 85.0, "purity": 95.0},
+        )
+        return mock
+
+    def test_execute_no_executor_raises(self, folio, project_with_observations):
+        """execute() with no executor raises ExecutorError."""
+        assert folio.executor is None
+
+        with pytest.raises(ExecutorError, match="(?i)no executor|executor.*none"):
+            folio.execute(project_with_observations)
+
+    def test_execute_uses_passed_executor(
+        self, folio, project_with_observations, mock_executor
+    ):
+        """execute() uses the passed executor parameter."""
+        folio.execute(project_with_observations, n_iter=1, executor=mock_executor)
+
+        mock_executor.execute.assert_called_once()
+
+    def test_execute_uses_cached_executor(
+        self, folio, project_with_observations, mock_executor
+    ):
+        """execute() uses self.executor when no executor is passed."""
+        folio.executor = mock_executor
+
+        folio.execute(project_with_observations, n_iter=1)
+
+        mock_executor.execute.assert_called_once()
+
+    def test_execute_passed_executor_takes_precedence(
+        self, folio, project_with_observations, mock_executor
+    ):
+        """Passed executor takes precedence over cached executor."""
+        cached_executor = MagicMock(spec=Executor)
+        cached_executor.execute.return_value = Observation(
+            project_id=1,
+            inputs={"temperature": 50.0, "pressure": 5.0},
+            outputs={"yield": 80.0, "purity": 90.0},
+        )
+        folio.executor = cached_executor
+
+        folio.execute(project_with_observations, n_iter=1, executor=mock_executor)
+
+        mock_executor.execute.assert_called_once()
+        cached_executor.execute.assert_not_called()
+
+    def test_execute_returns_observations_list(
+        self, folio, project_with_observations, mock_executor
+    ):
+        """execute() returns a list of Observation objects."""
+        result = folio.execute(
+            project_with_observations, n_iter=3, executor=mock_executor
+        )
+
+        assert isinstance(result, list)
+        assert len(result) == 3
+        assert all(isinstance(obs, Observation) for obs in result)
+
+    def test_execute_runs_n_iterations(
+        self, folio, project_with_observations, mock_executor
+    ):
+        """execute() runs exactly n_iter iterations."""
+        folio.execute(project_with_observations, n_iter=5, executor=mock_executor)
+
+        assert mock_executor.execute.call_count == 5
+
+    def test_execute_adds_observations_to_database(
+        self, folio, project_with_observations, mock_executor
+    ):
+        """execute() adds observations to the database."""
+        initial_count = len(folio.get_observations(project_with_observations))
+
+        folio.execute(project_with_observations, n_iter=3, executor=mock_executor)
+
+        final_count = len(folio.get_observations(project_with_observations))
+        assert final_count == initial_count + 3
+
+    def test_execute_stop_on_error_true_reraises(
+        self, folio, project_with_observations, mock_executor
+    ):
+        """execute() with stop_on_error=True re-raises execution errors."""
+        mock_executor.execute.side_effect = ExecutorError("Experiment failed")
+
+        with pytest.raises(ExecutorError, match="(?i)failed"):
+            folio.execute(
+                project_with_observations,
+                n_iter=3,
+                stop_on_error=True,
+                executor=mock_executor,
+            )
+
+    def test_execute_stop_on_error_false_continues(
+        self, folio, project_with_observations, mock_executor
+    ):
+        """execute() with stop_on_error=False continues after errors."""
+        # First call succeeds, second fails, third succeeds
+        mock_executor.execute.side_effect = [
+            Observation(
+                project_id=1,
+                inputs={"temperature": 50.0, "pressure": 5.0},
+                outputs={"yield": 85.0, "purity": 95.0},
+            ),
+            ExecutorError("Experiment failed"),
+            Observation(
+                project_id=1,
+                inputs={"temperature": 60.0, "pressure": 6.0},
+                outputs={"yield": 88.0, "purity": 96.0},
+            ),
+        ]
+
+        result = folio.execute(
+            project_with_observations,
+            n_iter=3,
+            stop_on_error=False,
+            executor=mock_executor,
+        )
+
+        # Should return only successful observations
+        assert len(result) == 2
+
+    def test_execute_wait_between_runs(
+        self, folio, project_with_observations, mock_executor
+    ):
+        """execute() waits between iterations when wait_between_runs > 0."""
+        with patch("time.sleep") as mock_sleep:
+            folio.execute(
+                project_with_observations,
+                n_iter=3,
+                wait_between_runs=0.5,
+                executor=mock_executor,
+            )
+
+            # Should sleep between iterations (n_iter - 1 times, or n_iter times)
+            assert mock_sleep.call_count >= 2
+            mock_sleep.assert_called_with(0.5)
+
+    def test_execute_project_not_found_raises(self, folio, mock_executor):
+        """execute() raises ProjectNotFoundError for non-existent project."""
+        with pytest.raises(ProjectNotFoundError, match="(?i)nonexistent|not found"):
+            folio.execute("nonexistent_project", n_iter=1, executor=mock_executor)
+
+    def test_execute_calls_suggest_for_each_iteration(
+        self, folio, project_with_observations, mock_executor
+    ):
+        """execute() calls suggest() for each iteration."""
+        with patch.object(folio, "suggest", wraps=folio.suggest) as mock_suggest:
+            folio.execute(project_with_observations, n_iter=3, executor=mock_executor)
+
+            assert mock_suggest.call_count == 3
+
+    def test_execute_passes_suggestion_to_executor(
+        self, folio, project_with_observations, mock_executor
+    ):
+        """execute() passes the suggestion from suggest() to executor.execute()."""
+        folio.execute(project_with_observations, n_iter=1, executor=mock_executor)
+
+        # Verify executor.execute was called with a dict containing expected keys
+        call_args = mock_executor.execute.call_args
+        assert call_args is not None
+        suggestion = call_args[0][0]
+        assert "temperature" in suggestion
+        assert "pressure" in suggestion
+
+    def test_execute_single_iteration(
+        self, folio, project_with_observations, mock_executor
+    ):
+        """execute() with n_iter=1 runs a single iteration."""
+        result = folio.execute(
+            project_with_observations, n_iter=1, executor=mock_executor
+        )
+
+        assert len(result) == 1
+        mock_executor.execute.assert_called_once()
+
+    def test_execute_zero_iterations_returns_empty_list(
+        self, folio, project_with_observations, mock_executor
+    ):
+        """execute() with n_iter=0 returns an empty list."""
+        result = folio.execute(
+            project_with_observations, n_iter=0, executor=mock_executor
+        )
+
+        assert result == []
+        mock_executor.execute.assert_not_called()
+
+
+# =============================================================================
+# Executor Integration Tests
+# =============================================================================
+
+
+class TestExecutorIntegration:
+    """Integration tests for full executor workflow."""
+
+    @pytest.fixture
+    def mock_executor_with_varying_outputs(self):
+        """Create a mock executor that returns different outputs each call."""
+        mock = MagicMock(spec=Executor)
+        call_count = [0]
+
+        def execute_side_effect(suggestion, project):
+            call_count[0] += 1
+            return Observation(
+                project_id=project.id,
+                inputs=suggestion,
+                outputs={
+                    "yield": 70.0 + call_count[0] * 5,
+                    "purity": 90.0 + call_count[0] * 2,
+                },
+            )
+
+        mock.execute.side_effect = execute_side_effect
+        return mock
+
+    def test_full_execution_workflow(
+        self,
+        folio,
+        sample_inputs,
+        sample_outputs,
+        sample_target_configs,
+        mock_executor_with_varying_outputs,
+    ):
+        """Complete workflow: create project, build executor, run execute loop."""
+        # 1. Create project
+        folio.create_project(
+            name="integration_test",
+            inputs=sample_inputs,
+            outputs=sample_outputs,
+            target_configs=sample_target_configs,
+        )
+
+        # 2. Add some initial observations
+        for i in range(3):
+            folio.add_observation(
+                project_name="integration_test",
+                inputs={"temperature": 40.0 + i * 20, "pressure": 3.0 + i * 2},
+                outputs={"yield": 65.0 + i * 5, "purity": 88.0 + i * 2},
+            )
+
+        # 3. Run execute loop
+        observations = folio.execute(
+            "integration_test",
+            n_iter=5,
+            executor=mock_executor_with_varying_outputs,
+        )
+
+        # 4. Verify results
+        assert len(observations) == 5
+        assert all(isinstance(obs, Observation) for obs in observations)
+
+        # 5. Verify observations were added to database
+        all_obs = folio.get_observations("integration_test")
+        assert len(all_obs) == 8  # 3 initial + 5 from execute
+
+    def test_execute_with_built_executor(
+        self,
+        folio,
+        sample_inputs,
+        sample_outputs,
+        sample_target_configs,
+    ):
+        """Test execute() using an executor built with build_executor()."""
+        # 1. Create project
+        folio.create_project(
+            name="built_executor_test",
+            inputs=sample_inputs,
+            outputs=sample_outputs,
+            target_configs=sample_target_configs,
+        )
+
+        # 2. Add initial observations
+        for i in range(3):
+            folio.add_observation(
+                project_name="built_executor_test",
+                inputs={"temperature": 40.0 + i * 20, "pressure": 3.0 + i * 2},
+                outputs={"yield": 65.0 + i * 5, "purity": 88.0 + i * 2},
+            )
+
+        # 3. Build executor
+        executor = folio.build_executor("human")
+        assert folio.executor is executor
+
+        # 4. Mock the executor's execute method for testing
+        mock_obs = Observation(
+            project_id=1,
+            inputs={"temperature": 50.0, "pressure": 5.0},
+            outputs={"yield": 85.0, "purity": 95.0},
+        )
+        with patch.object(executor, "execute", return_value=mock_obs):
+            # 5. Run execute (uses cached executor)
+            observations = folio.execute("built_executor_test", n_iter=2)
+
+            assert len(observations) == 2
+
+    def test_multi_objective_execution(
+        self,
+        folio,
+        sample_inputs,
+        sample_outputs,
+        sample_multi_target_configs,
+        mock_executor_with_varying_outputs,
+    ):
+        """Test execute() with a multi-objective project."""
+        # 1. Create multi-objective project
+        folio.create_project(
+            name="mo_execute_test",
+            inputs=sample_inputs,
+            outputs=sample_outputs,
+            target_configs=sample_multi_target_configs,
+            reference_point=[50.0, 80.0],
+            recommender_config=RecommenderConfig(
+                type="bayesian",
+                surrogate="multitask_gp",
+                mo_acquisition="nehvi",
+            ),
+        )
+
+        # 2. Add initial observations
+        for i in range(5):
+            folio.add_observation(
+                project_name="mo_execute_test",
+                inputs={"temperature": 30.0 + i * 15, "pressure": 2.0 + i * 1.5},
+                outputs={"yield": 60.0 + i * 6, "purity": 85.0 + i * 2.5},
+            )
+
+        # 3. Run execute loop
+        observations = folio.execute(
+            "mo_execute_test",
+            n_iter=3,
+            executor=mock_executor_with_varying_outputs,
+        )
+
+        # 4. Verify results
+        assert len(observations) == 3
+        assert all(isinstance(obs, Observation) for obs in observations)
+
+    def test_execution_with_partial_failures(
+        self,
+        folio,
+        sample_inputs,
+        sample_outputs,
+        sample_target_configs,
+    ):
+        """Test execute() continues after partial failures with stop_on_error=False."""
+        # 1. Create project
+        folio.create_project(
+            name="partial_failure_test",
+            inputs=sample_inputs,
+            outputs=sample_outputs,
+            target_configs=sample_target_configs,
+        )
+
+        # 2. Add initial observations
+        for i in range(3):
+            folio.add_observation(
+                project_name="partial_failure_test",
+                inputs={"temperature": 40.0 + i * 20, "pressure": 3.0 + i * 2},
+                outputs={"yield": 65.0 + i * 5, "purity": 88.0 + i * 2},
+            )
+
+        # 3. Create executor that fails on second call
+        mock_executor = MagicMock(spec=Executor)
+        mock_executor.execute.side_effect = [
+            Observation(
+                project_id=1,
+                inputs={"temperature": 50.0, "pressure": 5.0},
+                outputs={"yield": 80.0, "purity": 92.0},
+            ),
+            ExecutorError("Hardware malfunction"),
+            Observation(
+                project_id=1,
+                inputs={"temperature": 60.0, "pressure": 6.0},
+                outputs={"yield": 85.0, "purity": 94.0},
+            ),
+            ExecutorError("Connection timeout"),
+            Observation(
+                project_id=1,
+                inputs={"temperature": 70.0, "pressure": 7.0},
+                outputs={"yield": 90.0, "purity": 96.0},
+            ),
+        ]
+
+        # 4. Run execute with stop_on_error=False
+        observations = folio.execute(
+            "partial_failure_test",
+            n_iter=5,
+            stop_on_error=False,
+            executor=mock_executor,
+        )
+
+        # 5. Verify only successful observations are returned
+        assert len(observations) == 3
+
+        # 6. Verify all 5 attempts were made
+        assert mock_executor.execute.call_count == 5
+
+    def test_execution_improves_suggestions(
+        self,
+        folio,
+        sample_inputs,
+        sample_outputs,
+        sample_target_configs,
+    ):
+        """Test that suggestions improve as more observations are added."""
+        # 1. Create project
+        folio.create_project(
+            name="improvement_test",
+            inputs=sample_inputs,
+            outputs=sample_outputs,
+            target_configs=sample_target_configs,
+        )
+
+        # 2. Add initial observations with known pattern
+        # Higher temperature = higher yield
+        for temp in [30.0, 50.0, 70.0]:
+            folio.add_observation(
+                project_name="improvement_test",
+                inputs={"temperature": temp, "pressure": 5.0},
+                outputs={"yield": temp + 20.0, "purity": 90.0},
+            )
+
+        # 3. Create executor that returns observation based on inputs
+        mock_executor = MagicMock(spec=Executor)
+
+        def smart_execute(suggestion, project):
+            temp = suggestion["temperature"]
+            return Observation(
+                project_id=project.id,
+                inputs=suggestion,
+                outputs={"yield": temp + 20.0, "purity": 90.0},
+            )
+
+        mock_executor.execute.side_effect = smart_execute
+
+        # 4. Run a few iterations
+        observations = folio.execute(
+            "improvement_test",
+            n_iter=3,
+            executor=mock_executor,
+        )
+
+        # 5. Verify observations were created
+        assert len(observations) == 3
+
+        # 6. The recommender should be suggesting higher temperatures
+        # (since higher temp = higher yield in our pattern)
+        all_obs = folio.get_observations("improvement_test")
+        assert len(all_obs) == 6  # 3 initial + 3 from execute

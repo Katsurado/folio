@@ -9,9 +9,17 @@ from folio.core.database import DEFAULT_DB_PATH
 from folio.core.observation import Observation
 from folio.core.project import Project
 from folio.core.schema import InputSpec, OutputSpec
+from folio.exceptions import ExecutorError  # noqa: F401 (used in implementation)
+from folio.executors import ClaudeLightExecutor, Executor, HumanExecutor
 from folio.recommenders import BayesianRecommender, RandomRecommender, Recommender
 
 logger = logging.getLogger(__name__)
+
+# Registry mapping executor names to their classes
+_EXECUTOR_REGISTRY: dict[str, type[Executor]] = {
+    "human": HumanExecutor,
+    "claude_light": ClaudeLightExecutor,
+}
 
 
 class Folio:
@@ -69,6 +77,7 @@ class Folio:
         """
         self.db_path = Path(db_path) if isinstance(db_path, str) else db_path
         self._recommenders: dict[str, Recommender] = {}
+        self.executor: Executor | None = None
         database.init_db(self.db_path)
 
     def create_project(
@@ -447,3 +456,114 @@ class Folio:
         else:
             raise ValueError(f"unknown recommender: {rec_config.type}")
         return rec
+
+    def build_executor(self, executor_name: str) -> Executor:
+        """Build and cache an executor by name.
+
+        Creates an executor instance based on the provided name and caches it
+        in `self.executor` for use by `execute()`.
+
+        Parameters
+        ----------
+        executor_name : str
+            Name of the executor to build. Supported values:
+            - "human": HumanExecutor for manual experiment entry
+            - "claude_light": ClaudeLightExecutor for autonomous execution
+
+        Returns
+        -------
+        Executor
+            The created executor instance, also stored in `self.executor`.
+
+        Raises
+        ------
+        ValueError
+            If the executor name is not recognized.
+
+        Examples
+        --------
+        >>> folio = Folio()
+        >>> executor = folio.build_executor("human")
+        >>> print(type(executor))
+        <class 'folio.executors.human.HumanExecutor'>
+
+        >>> folio.build_executor("claude_light")
+        >>> folio.execute("my_project", n_iter=5)  # Uses cached executor
+        """
+        raise NotImplementedError
+
+    def execute(
+        self,
+        project_name: str,
+        n_iter: int = 1,
+        stop_on_error: bool = True,
+        wait_between_runs: float = 0.0,
+        executor: Executor | None = None,
+    ) -> list[Observation]:
+        """Run an automated experiment loop.
+
+        Executes a closed-loop optimization workflow: for each iteration,
+        gets a suggestion from the recommender, runs the experiment via the
+        executor, and records the observation.
+
+        Parameters
+        ----------
+        project_name : str
+            Name of the project to run experiments for.
+        n_iter : int, optional
+            Number of experiment iterations to run. Defaults to 1.
+        stop_on_error : bool, optional
+            If True (default), re-raise any execution errors immediately.
+            If False, log the error and continue with remaining iterations.
+        wait_between_runs : float, optional
+            Time in seconds to wait between iterations. Defaults to 0.0.
+            Useful for rate-limiting or allowing system cooldown.
+        executor : Executor | None, optional
+            Executor to use for running experiments. If None, uses the
+            executor cached in `self.executor` (set via `build_executor()`).
+
+        Returns
+        -------
+        list[Observation]
+            List of observations created during the execution loop.
+            On partial failure (stop_on_error=False), returns only successful
+            observations.
+
+        Raises
+        ------
+        ExecutorError
+            If no executor is provided and self.executor is None.
+        ExecutorError
+            If experiment execution fails (when stop_on_error=True).
+        ProjectNotFoundError
+            If the project doesn't exist.
+
+        Examples
+        --------
+        Run 5 iterations with the cached executor:
+
+        >>> folio.build_executor("human")
+        >>> observations = folio.execute("my_project", n_iter=5)
+        >>> print(f"Completed {len(observations)} experiments")
+
+        Run with a specific executor and error handling:
+
+        >>> from folio.executors import ClaudeLightExecutor
+        >>> executor = ClaudeLightExecutor(api_url="http://localhost:8000")
+        >>> observations = folio.execute(
+        ...     "my_project",
+        ...     n_iter=10,
+        ...     stop_on_error=False,
+        ...     wait_between_runs=1.0,
+        ...     executor=executor,
+        ... )
+
+        Notes
+        -----
+        The execution loop follows this pattern for each iteration:
+        1. Call `suggest()` to get recommended inputs
+        2. Call `executor.execute()` with the suggestion
+        3. Call `add_observation()` to record the result
+        4. Sleep for `wait_between_runs` seconds (if > 0)
+        """
+        raise NotImplementedError
