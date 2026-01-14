@@ -1,4 +1,13 @@
-"""SQLite database operations for projects and observations."""
+"""SQLite database operations for projects and observations.
+
+Supports both local SQLite and cloud libSQL backends. For cloud sync,
+provide sync_url and auth_token parameters to get_connection().
+
+Environment variables for libSQL cloud sync:
+    CLAUDELIGHT_DB_URL: libSQL database URL (e.g., libsql://your-db.turso.io)
+    CLAUDELIGHT_RW: Read-write authentication token
+    CLAUDELIGHT_RO: Read-only authentication token
+"""
 
 import json
 import logging
@@ -8,6 +17,9 @@ from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
+from typing import Any
+
+import libsql
 
 from folio.core.config import RecommenderConfig, TargetConfig
 from folio.core.observation import Observation
@@ -58,7 +70,11 @@ def _ensure_db_dir(db_path: Path) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
 
-def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
+def init_db(
+    db_path: Path = DEFAULT_DB_PATH,
+    sync_url: str | None = None,
+    auth_token: str | None = None,
+) -> None:
     """Initialize the database with schema tables.
 
     Creates the projects and observations tables if they don't exist.
@@ -68,42 +84,92 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
     ----------
     db_path : Path, optional
         Path to the database file. Defaults to ~/.folio/folio.db.
+    sync_url : str, optional
+        libSQL sync URL for cloud synchronization (e.g., libsql://your-db.turso.io).
+        If provided, uses libsql.connect() instead of sqlite3.connect().
+    auth_token : str, optional
+        Authentication token for libSQL cloud sync. Required if sync_url is provided.
+
+    Examples
+    --------
+    >>> # Local SQLite
+    >>> init_db(Path("my_project.db"))
+
+    >>> # libSQL with cloud sync
+    >>> init_db(
+    ...     Path("my_project.db"),
+    ...     sync_url="libsql://my-db.turso.io",
+    ...     auth_token="my-token"
+    ... )
     """
     _ensure_db_dir(db_path)
-    with sqlite3.connect(db_path) as conn:
+    if sync_url is not None:
+        conn = libsql.connect(str(db_path), sync_url=sync_url, auth_token=auth_token)
         conn.executescript(_SCHEMA)
+        conn.commit()
+        conn.sync()
+        conn.close()
+    else:
+        with sqlite3.connect(db_path) as conn:
+            conn.executescript(_SCHEMA)
     logger.info(f"Initialized database at {db_path}")
 
 
 @contextmanager
-def get_connection(db_path: Path = DEFAULT_DB_PATH) -> Iterator[sqlite3.Connection]:
+def get_connection(
+    db_path: Path = DEFAULT_DB_PATH,
+    sync_url: str | None = None,
+    auth_token: str | None = None,
+) -> Iterator[Any]:
     """Context manager for database connections with automatic commit/rollback.
 
     Opens a connection with foreign keys enabled and Row factory configured.
     Automatically commits on successful exit or rolls back on exception.
+    For libSQL connections, calls sync() after commit to push changes to cloud.
 
     Parameters
     ----------
     db_path : Path, optional
         Path to the database file. Defaults to ~/.folio/folio.db.
+    sync_url : str, optional
+        libSQL sync URL for cloud synchronization (e.g., libsql://your-db.turso.io).
+        If provided, uses libsql.connect() instead of sqlite3.connect().
+    auth_token : str, optional
+        Authentication token for libSQL cloud sync. Required if sync_url is provided.
 
     Yields
     ------
-    sqlite3.Connection
+    sqlite3.Connection | libsql.Connection
         Database connection with Row factory enabled.
 
     Examples
     --------
+    >>> # Local SQLite
     >>> with get_connection() as conn:
     ...     conn.execute("SELECT * FROM projects")
+
+    >>> # libSQL with cloud sync
+    >>> with get_connection(
+    ...     sync_url="libsql://my-db.turso.io",
+    ...     auth_token="my-token"
+    ... ) as conn:
+    ...     conn.execute("INSERT INTO projects ...")
     """
     _ensure_db_dir(db_path)
-    conn = sqlite3.connect(db_path)
+    use_libsql = sync_url is not None
+
+    if use_libsql:
+        conn = libsql.connect(str(db_path), sync_url=sync_url, auth_token=auth_token)
+    else:
+        conn = sqlite3.connect(db_path)
+
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     try:
         yield conn
         conn.commit()
+        if use_libsql:
+            conn.sync()
     except Exception:
         conn.rollback()
         raise
@@ -301,7 +367,12 @@ def _row_to_project(row: sqlite3.Row) -> Project:
     )
 
 
-def create_project(project: Project, db_path: Path = DEFAULT_DB_PATH) -> Project:
+def create_project(
+    project: Project,
+    db_path: Path = DEFAULT_DB_PATH,
+    sync_url: str | None = None,
+    auth_token: str | None = None,
+) -> Project:
     """Create a new project in the database.
 
     Parameters
@@ -310,6 +381,10 @@ def create_project(project: Project, db_path: Path = DEFAULT_DB_PATH) -> Project
         Project to create. The id field is ignored; a new ID will be assigned.
     db_path : Path, optional
         Path to the database file. Defaults to ~/.folio/folio.db.
+    sync_url : str, optional
+        libSQL sync URL for cloud synchronization.
+    auth_token : str, optional
+        Authentication token for libSQL cloud sync.
 
     Returns
     -------
@@ -321,8 +396,8 @@ def create_project(project: Project, db_path: Path = DEFAULT_DB_PATH) -> Project
     ProjectExistsError
         If a project with the same name already exists.
     """
-    init_db(db_path)
-    with get_connection(db_path) as conn:
+    init_db(db_path, sync_url=sync_url, auth_token=auth_token)
+    with get_connection(db_path, sync_url=sync_url, auth_token=auth_token) as conn:
         try:
             cursor = conn.execute(
                 """
@@ -359,7 +434,12 @@ def create_project(project: Project, db_path: Path = DEFAULT_DB_PATH) -> Project
     )
 
 
-def get_project(name: str, db_path: Path = DEFAULT_DB_PATH) -> Project:
+def get_project(
+    name: str,
+    db_path: Path = DEFAULT_DB_PATH,
+    sync_url: str | None = None,
+    auth_token: str | None = None,
+) -> Project:
     """Get a project by name.
 
     Parameters
@@ -368,6 +448,10 @@ def get_project(name: str, db_path: Path = DEFAULT_DB_PATH) -> Project:
         Name of the project to retrieve.
     db_path : Path, optional
         Path to the database file. Defaults to ~/.folio/folio.db.
+    sync_url : str, optional
+        libSQL sync URL for cloud synchronization.
+    auth_token : str, optional
+        Authentication token for libSQL cloud sync.
 
     Returns
     -------
@@ -379,18 +463,23 @@ def get_project(name: str, db_path: Path = DEFAULT_DB_PATH) -> Project:
     ProjectNotFoundError
         If no project with the given name exists.
     """
-    init_db(db_path)
-    with get_connection(db_path) as conn:
+    init_db(db_path, sync_url=sync_url, auth_token=auth_token)
+    with get_connection(db_path, sync_url=sync_url, auth_token=auth_token) as conn:
         row = conn.execute("SELECT * FROM projects WHERE name = ?", (name,)).fetchone()
 
     if row is None:
-        available = list_projects(db_path)
+        available = list_projects(db_path, sync_url=sync_url, auth_token=auth_token)
         raise ProjectNotFoundError(f"No project named '{name}'. Available: {available}")
 
     return _row_to_project(row)
 
 
-def get_project_by_id(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> Project:
+def get_project_by_id(
+    project_id: int,
+    db_path: Path = DEFAULT_DB_PATH,
+    sync_url: str | None = None,
+    auth_token: str | None = None,
+) -> Project:
     """Get a project by database ID.
 
     Parameters
@@ -399,6 +488,10 @@ def get_project_by_id(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> Proje
         Database ID of the project to retrieve.
     db_path : Path, optional
         Path to the database file. Defaults to ~/.folio/folio.db.
+    sync_url : str, optional
+        libSQL sync URL for cloud synchronization.
+    auth_token : str, optional
+        Authentication token for libSQL cloud sync.
 
     Returns
     -------
@@ -410,8 +503,8 @@ def get_project_by_id(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> Proje
     ProjectNotFoundError
         If no project with the given ID exists.
     """
-    init_db(db_path)
-    with get_connection(db_path) as conn:
+    init_db(db_path, sync_url=sync_url, auth_token=auth_token)
+    with get_connection(db_path, sync_url=sync_url, auth_token=auth_token) as conn:
         row = conn.execute(
             "SELECT * FROM projects WHERE id = ?", (project_id,)
         ).fetchone()
@@ -422,26 +515,39 @@ def get_project_by_id(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> Proje
     return _row_to_project(row)
 
 
-def list_projects(db_path: Path = DEFAULT_DB_PATH) -> list[str]:
+def list_projects(
+    db_path: Path = DEFAULT_DB_PATH,
+    sync_url: str | None = None,
+    auth_token: str | None = None,
+) -> list[str]:
     """List all project names in alphabetical order.
 
     Parameters
     ----------
     db_path : Path, optional
         Path to the database file. Defaults to ~/.folio/folio.db.
+    sync_url : str, optional
+        libSQL sync URL for cloud synchronization.
+    auth_token : str, optional
+        Authentication token for libSQL cloud sync.
 
     Returns
     -------
     list[str]
         Names of all projects, sorted alphabetically.
     """
-    init_db(db_path)
-    with get_connection(db_path) as conn:
+    init_db(db_path, sync_url=sync_url, auth_token=auth_token)
+    with get_connection(db_path, sync_url=sync_url, auth_token=auth_token) as conn:
         rows = conn.execute("SELECT name FROM projects ORDER BY name").fetchall()
     return [row["name"] for row in rows]
 
 
-def delete_project(name: str, db_path: Path = DEFAULT_DB_PATH) -> None:
+def delete_project(
+    name: str,
+    db_path: Path = DEFAULT_DB_PATH,
+    sync_url: str | None = None,
+    auth_token: str | None = None,
+) -> None:
     """Delete a project and all its observations.
 
     Parameters
@@ -450,6 +556,10 @@ def delete_project(name: str, db_path: Path = DEFAULT_DB_PATH) -> None:
         Name of the project to delete.
     db_path : Path, optional
         Path to the database file. Defaults to ~/.folio/folio.db.
+    sync_url : str, optional
+        libSQL sync URL for cloud synchronization.
+    auth_token : str, optional
+        Authentication token for libSQL cloud sync.
 
     Raises
     ------
@@ -460,10 +570,10 @@ def delete_project(name: str, db_path: Path = DEFAULT_DB_PATH) -> None:
     -----
     All observations associated with the project are deleted via CASCADE.
     """
-    with get_connection(db_path) as conn:
+    with get_connection(db_path, sync_url=sync_url, auth_token=auth_token) as conn:
         cursor = conn.execute("DELETE FROM projects WHERE name = ?", (name,))
         if cursor.rowcount == 0:
-            available = list_projects(db_path)
+            available = list_projects(db_path, sync_url=sync_url, auth_token=auth_token)
             raise ProjectNotFoundError(
                 f"No project named '{name}'. Available: {available}"
             )
@@ -499,7 +609,10 @@ def _row_to_observation(row: sqlite3.Row) -> Observation:
 
 
 def add_observation(
-    observation: Observation, db_path: Path = DEFAULT_DB_PATH
+    observation: Observation,
+    db_path: Path = DEFAULT_DB_PATH,
+    sync_url: str | None = None,
+    auth_token: str | None = None,
 ) -> Observation:
     """Add an observation to the database.
 
@@ -509,13 +622,17 @@ def add_observation(
         Observation to add. The id field is ignored; a new ID will be assigned.
     db_path : Path, optional
         Path to the database file. Defaults to ~/.folio/folio.db.
+    sync_url : str, optional
+        libSQL sync URL for cloud synchronization.
+    auth_token : str, optional
+        Authentication token for libSQL cloud sync.
 
     Returns
     -------
     Observation
         The added observation with its assigned database ID.
     """
-    with get_connection(db_path) as conn:
+    with get_connection(db_path, sync_url=sync_url, auth_token=auth_token) as conn:
         cursor = conn.execute(
             """
             INSERT INTO observations (project_id, inputs_json, outputs_json,
@@ -550,7 +667,10 @@ def add_observation(
 
 
 def get_observations(
-    project_id: int, db_path: Path = DEFAULT_DB_PATH
+    project_id: int,
+    db_path: Path = DEFAULT_DB_PATH,
+    sync_url: str | None = None,
+    auth_token: str | None = None,
 ) -> list[Observation]:
     """Get all observations for a project, ordered by timestamp.
 
@@ -560,13 +680,17 @@ def get_observations(
         Database ID of the project.
     db_path : Path, optional
         Path to the database file. Defaults to ~/.folio/folio.db.
+    sync_url : str, optional
+        libSQL sync URL for cloud synchronization.
+    auth_token : str, optional
+        Authentication token for libSQL cloud sync.
 
     Returns
     -------
     list[Observation]
         All observations for the project, sorted chronologically.
     """
-    with get_connection(db_path) as conn:
+    with get_connection(db_path, sync_url=sync_url, auth_token=auth_token) as conn:
         rows = conn.execute(
             """
             SELECT * FROM observations
@@ -579,7 +703,10 @@ def get_observations(
 
 
 def get_observation(
-    observation_id: int, db_path: Path = DEFAULT_DB_PATH
+    observation_id: int,
+    db_path: Path = DEFAULT_DB_PATH,
+    sync_url: str | None = None,
+    auth_token: str | None = None,
 ) -> Observation:
     """Get a single observation by database ID.
 
@@ -589,6 +716,10 @@ def get_observation(
         Database ID of the observation to retrieve.
     db_path : Path, optional
         Path to the database file. Defaults to ~/.folio/folio.db.
+    sync_url : str, optional
+        libSQL sync URL for cloud synchronization.
+    auth_token : str, optional
+        Authentication token for libSQL cloud sync.
 
     Returns
     -------
@@ -600,7 +731,7 @@ def get_observation(
     ValueError
         If no observation with the given ID exists.
     """
-    with get_connection(db_path) as conn:
+    with get_connection(db_path, sync_url=sync_url, auth_token=auth_token) as conn:
         row = conn.execute(
             "SELECT * FROM observations WHERE id = ?", (observation_id,)
         ).fetchone()
@@ -611,7 +742,12 @@ def get_observation(
     return _row_to_observation(row)
 
 
-def delete_observation(observation_id: int, db_path: Path = DEFAULT_DB_PATH) -> None:
+def delete_observation(
+    observation_id: int,
+    db_path: Path = DEFAULT_DB_PATH,
+    sync_url: str | None = None,
+    auth_token: str | None = None,
+) -> None:
     """Delete an observation by database ID.
 
     Parameters
@@ -620,13 +756,17 @@ def delete_observation(observation_id: int, db_path: Path = DEFAULT_DB_PATH) -> 
         Database ID of the observation to delete.
     db_path : Path, optional
         Path to the database file. Defaults to ~/.folio/folio.db.
+    sync_url : str, optional
+        libSQL sync URL for cloud synchronization.
+    auth_token : str, optional
+        Authentication token for libSQL cloud sync.
 
     Raises
     ------
     ValueError
         If no observation with the given ID exists.
     """
-    with get_connection(db_path) as conn:
+    with get_connection(db_path, sync_url=sync_url, auth_token=auth_token) as conn:
         cursor = conn.execute(
             "DELETE FROM observations WHERE id = ?", (observation_id,)
         )
@@ -635,7 +775,12 @@ def delete_observation(observation_id: int, db_path: Path = DEFAULT_DB_PATH) -> 
     logger.info(f"Deleted observation {observation_id}")
 
 
-def count_observations(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> int:
+def count_observations(
+    project_id: int,
+    db_path: Path = DEFAULT_DB_PATH,
+    sync_url: str | None = None,
+    auth_token: str | None = None,
+) -> int:
     """Count the number of observations for a project.
 
     Parameters
@@ -644,13 +789,17 @@ def count_observations(project_id: int, db_path: Path = DEFAULT_DB_PATH) -> int:
         Database ID of the project.
     db_path : Path, optional
         Path to the database file. Defaults to ~/.folio/folio.db.
+    sync_url : str, optional
+        libSQL sync URL for cloud synchronization.
+    auth_token : str, optional
+        Authentication token for libSQL cloud sync.
 
     Returns
     -------
     int
         Number of observations recorded for the project.
     """
-    with get_connection(db_path) as conn:
+    with get_connection(db_path, sync_url=sync_url, auth_token=auth_token) as conn:
         row = conn.execute(
             "SELECT COUNT(*) as count FROM observations WHERE project_id = ?",
             (project_id,),

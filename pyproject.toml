@@ -32,6 +32,7 @@ dependencies = [
     "pyyaml>=6.0",
     "botorch>=0.14",
     "matplotlib>=3.7",
+    "libsql>=0.1.0",
 ]
 
 [project.optional-dependencies]

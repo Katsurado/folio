@@ -1,11 +1,14 @@
 from datetime import datetime
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from folio.core.database import (
     add_observation,
     create_project,
+    delete_observation,
     delete_project,
+    get_connection,
     get_observations,
     get_project,
     init_db,
@@ -200,3 +203,210 @@ class TestObservationCRUD:
         )
         with pytest.raises(Exception):
             add_observation(obs, db_path=temp_db)
+
+
+class TestLibSQLConnection:
+    """Tests for libSQL cloud sync functionality using mocked connections."""
+
+    @pytest.fixture
+    def mock_libsql_conn(self):
+        """Create a mock libsql connection with all required methods."""
+        conn = MagicMock()
+        conn.row_factory = None
+        conn.execute.return_value = MagicMock()
+        conn.executescript.return_value = None
+        conn.commit.return_value = None
+        conn.rollback.return_value = None
+        conn.sync.return_value = None
+        conn.close.return_value = None
+        return conn
+
+    def test_get_connection_uses_libsql_when_sync_url_provided(
+        self, temp_db, mock_libsql_conn
+    ):
+        """Verify libsql.connect is called when sync_url is provided."""
+        with patch("folio.core.database.libsql") as mock_libsql:
+            mock_libsql.connect.return_value = mock_libsql_conn
+
+            with get_connection(
+                temp_db,
+                sync_url="libsql://test.turso.io",
+                auth_token="test-token",
+            ):
+                pass
+
+            mock_libsql.connect.assert_called_once_with(
+                str(temp_db),
+                sync_url="libsql://test.turso.io",
+                auth_token="test-token",
+            )
+
+    def test_get_connection_calls_sync_after_commit_for_libsql(
+        self, temp_db, mock_libsql_conn
+    ):
+        """Verify conn.sync() is called after commit for libsql connections."""
+        with patch("folio.core.database.libsql") as mock_libsql:
+            mock_libsql.connect.return_value = mock_libsql_conn
+
+            with get_connection(
+                temp_db,
+                sync_url="libsql://test.turso.io",
+                auth_token="test-token",
+            ) as conn:
+                conn.execute("SELECT 1")
+
+            mock_libsql_conn.commit.assert_called_once()
+            mock_libsql_conn.sync.assert_called_once()
+
+    def test_get_connection_no_sync_for_sqlite(self, temp_db):
+        """Verify sync is not called for regular SQLite connections."""
+        with patch("folio.core.database.sqlite3") as mock_sqlite3:
+            mock_conn = MagicMock()
+            mock_sqlite3.connect.return_value = mock_conn
+
+            with get_connection(temp_db) as conn:
+                conn.execute("SELECT 1")
+
+            mock_conn.commit.assert_called_once()
+            mock_conn.sync.assert_not_called()
+
+    def test_init_db_with_libsql_calls_sync(self, temp_db, mock_libsql_conn):
+        """Verify init_db with libsql calls sync after schema creation."""
+        with patch("folio.core.database.libsql") as mock_libsql:
+            mock_libsql.connect.return_value = mock_libsql_conn
+
+            init_db(
+                temp_db,
+                sync_url="libsql://test.turso.io",
+                auth_token="test-token",
+            )
+
+            mock_libsql.connect.assert_called_once()
+            mock_libsql_conn.executescript.assert_called_once()
+            mock_libsql_conn.commit.assert_called_once()
+            mock_libsql_conn.sync.assert_called_once()
+            mock_libsql_conn.close.assert_called_once()
+
+    def test_create_project_with_libsql_syncs(self, temp_db, sample_project):
+        """Verify create_project syncs when using libsql."""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.lastrowid = 1
+        mock_conn.execute.return_value = mock_cursor
+
+        with patch("folio.core.database.libsql") as mock_libsql:
+            mock_libsql.connect.return_value = mock_conn
+
+            create_project(
+                sample_project,
+                db_path=temp_db,
+                sync_url="libsql://test.turso.io",
+                auth_token="test-token",
+            )
+
+            # Should sync twice: once for init_db and once for create_project
+            assert mock_conn.sync.call_count == 2
+
+    def test_add_observation_with_libsql_syncs(self, temp_db, sample_project):
+        """Verify add_observation syncs when using libsql."""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.lastrowid = 1
+        mock_conn.execute.return_value = mock_cursor
+
+        with patch("folio.core.database.libsql") as mock_libsql:
+            mock_libsql.connect.return_value = mock_conn
+
+            # First create a project
+            create_project(
+                sample_project,
+                db_path=temp_db,
+                sync_url="libsql://test.turso.io",
+                auth_token="test-token",
+            )
+
+            # Reset sync call count
+            mock_conn.sync.reset_mock()
+
+            obs = Observation(
+                project_id=1,
+                inputs={"temperature": 50.0, "solvent": "water"},
+                outputs={"yield": 85.5},
+            )
+            add_observation(
+                obs,
+                db_path=temp_db,
+                sync_url="libsql://test.turso.io",
+                auth_token="test-token",
+            )
+
+            mock_conn.sync.assert_called_once()
+
+    def test_delete_project_with_libsql_syncs(self, temp_db):
+        """Verify delete_project syncs when using libsql."""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.rowcount = 1
+        mock_conn.execute.return_value = mock_cursor
+
+        with patch("folio.core.database.libsql") as mock_libsql:
+            mock_libsql.connect.return_value = mock_conn
+
+            delete_project(
+                "test_project",
+                db_path=temp_db,
+                sync_url="libsql://test.turso.io",
+                auth_token="test-token",
+            )
+
+            mock_conn.sync.assert_called_once()
+
+    def test_delete_observation_with_libsql_syncs(self, temp_db):
+        """Verify delete_observation syncs when using libsql."""
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.rowcount = 1
+        mock_conn.execute.return_value = mock_cursor
+
+        with patch("folio.core.database.libsql") as mock_libsql:
+            mock_libsql.connect.return_value = mock_conn
+
+            delete_observation(
+                observation_id=1,
+                db_path=temp_db,
+                sync_url="libsql://test.turso.io",
+                auth_token="test-token",
+            )
+
+            mock_conn.sync.assert_called_once()
+
+    def test_get_connection_rollback_on_exception(self, temp_db, mock_libsql_conn):
+        """Verify connection rolls back on exception."""
+        with patch("folio.core.database.libsql") as mock_libsql:
+            mock_libsql.connect.return_value = mock_libsql_conn
+
+            with pytest.raises(ValueError):
+                with get_connection(
+                    temp_db,
+                    sync_url="libsql://test.turso.io",
+                    auth_token="test-token",
+                ):
+                    raise ValueError("Test error")
+
+            mock_libsql_conn.rollback.assert_called_once()
+            mock_libsql_conn.sync.assert_not_called()
+
+    def test_get_connection_closes_on_exception(self, temp_db, mock_libsql_conn):
+        """Verify connection is closed even on exception."""
+        with patch("folio.core.database.libsql") as mock_libsql:
+            mock_libsql.connect.return_value = mock_libsql_conn
+
+            with pytest.raises(ValueError):
+                with get_connection(
+                    temp_db,
+                    sync_url="libsql://test.turso.io",
+                    auth_token="test-token",
+                ):
+                    raise ValueError("Test error")
+
+            mock_libsql_conn.close.assert_called_once()
