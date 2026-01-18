@@ -185,7 +185,13 @@ class OpenAIBackend(LLMBackend):
 
         try:
             data = response.json()
-            return data["output"][0]["content"][0]["text"]
+            # Find the message output (web search responses have multiple outputs)
+            for output_item in data["output"]:
+                if output_item.get("type") == "message":
+                    for content_item in output_item.get("content", []):
+                        if content_item.get("type") == "output_text":
+                            return content_item["text"]
+            raise LLMResponseError("No message content found in API response")
         except (KeyError, IndexError, TypeError) as e:
             raise LLMResponseError(f"Unexpected OpenAI API response format: {e}") from e
 
