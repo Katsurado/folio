@@ -746,4 +746,10 @@ class Folio:
             max_cost_per_call=max_cost_per_call,
         )
 
+        # Print model and estimated cost before making API call
+        prompt = initializer._build_prompt(project, n, description, existing=None)
+        estimated_cost = backend.estimate_cost(prompt)
+        model_name = getattr(backend, "model", "unknown")
+        print(f"Model: {model_name}, Estimated cost: ${estimated_cost:.4f}")
+
         return initializer.suggest(project, n=n, description=description)

@@ -118,8 +118,18 @@ class OpenAIBackend(LLMBackend):
     >>> cost = backend.estimate_cost("Long prompt...", max_output_tokens=2000)
     """
 
-    INPUT_COST_PER_MILLION = 1.75
-    OUTPUT_COST_PER_MILLION = 14.00
+    # Model pricing (input $/1M tokens, output $/1M tokens)
+    # Source: OpenAI pricing page (2025)
+    MODEL_PRICING: dict[str, dict[str, float]] = {
+        "gpt-5.2": {"input": 1.75, "output": 14.00},
+        "gpt-5.2-mini": {"input": 0.30, "output": 1.25},
+        "gpt-4.1": {"input": 2.00, "output": 8.00},
+        "gpt-4.1-mini": {"input": 0.40, "output": 1.60},
+        "gpt-4.1-nano": {"input": 0.10, "output": 0.40},
+        "gpt-4o": {"input": 2.50, "output": 10.00},
+        "gpt-4o-mini": {"input": 0.15, "output": 0.60},
+    }
+    DEFAULT_PRICING = {"input": 2.00, "output": 8.00}  # Fallback for unknown models
     WEB_SEARCH_COST_PER_CALL = 0.01
     WEB_SEARCH_CONTEXT_TOKENS = 8000
 
@@ -210,11 +220,13 @@ class OpenAIBackend(LLMBackend):
         float
             Estimated cost in USD.
         """
+        pricing = self.MODEL_PRICING.get(self.model, self.DEFAULT_PRICING)
+
         input_tokens = _estimate_tokens(prompt)
         total_input_tokens = input_tokens + self.WEB_SEARCH_CONTEXT_TOKENS
 
-        input_cost = (total_input_tokens / 1_000_000) * self.INPUT_COST_PER_MILLION
-        output_cost = (max_output_tokens / 1_000_000) * self.OUTPUT_COST_PER_MILLION
+        input_cost = (total_input_tokens / 1_000_000) * pricing["input"]
+        output_cost = (max_output_tokens / 1_000_000) * pricing["output"]
         search_cost = self.WEB_SEARCH_COST_PER_CALL
 
         return input_cost + output_cost + search_cost
