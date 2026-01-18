@@ -163,7 +163,8 @@ def get_connection(
     else:
         conn = sqlite3.connect(db_path)
 
-    conn.row_factory = sqlite3.Row
+    if not use_libsql:
+        conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     try:
         yield conn
@@ -341,6 +342,32 @@ def _deserialize_recommender_config(config_json: str) -> RecommenderConfig:
     return RecommenderConfig(**json.loads(config_json))
 
 
+def _row_as_dict(row, cursor) -> dict | None:
+    """Convert a database row to dict for column-name access.
+
+    sqlite3.Row already supports dict-like access, but libsql returns tuples.
+    This function normalizes both to dict for consistent access.
+
+    Parameters
+    ----------
+    row : sqlite3.Row | tuple | None
+        Database row from fetchone/fetchall.
+    cursor : Cursor
+        Cursor used for the query (needed for column names).
+
+    Returns
+    -------
+    dict | None
+        Row as dict, or None if row is None.
+    """
+    if row is None:
+        return None
+    if hasattr(row, "keys"):
+        return row
+    columns = [col[0] for col in cursor.description]
+    return dict(zip(columns, row))
+
+
 def _row_to_project(row: sqlite3.Row) -> Project:
     """Convert database row to Project instance.
 
@@ -465,7 +492,8 @@ def get_project(
     """
     init_db(db_path, sync_url=sync_url, auth_token=auth_token)
     with get_connection(db_path, sync_url=sync_url, auth_token=auth_token) as conn:
-        row = conn.execute("SELECT * FROM projects WHERE name = ?", (name,)).fetchone()
+        cursor = conn.execute("SELECT * FROM projects WHERE name = ?", (name,))
+        row = _row_as_dict(cursor.fetchone(), cursor)
 
     if row is None:
         available = list_projects(db_path, sync_url=sync_url, auth_token=auth_token)
@@ -505,9 +533,8 @@ def get_project_by_id(
     """
     init_db(db_path, sync_url=sync_url, auth_token=auth_token)
     with get_connection(db_path, sync_url=sync_url, auth_token=auth_token) as conn:
-        row = conn.execute(
-            "SELECT * FROM projects WHERE id = ?", (project_id,)
-        ).fetchone()
+        cursor = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,))
+        row = _row_as_dict(cursor.fetchone(), cursor)
 
     if row is None:
         raise ProjectNotFoundError(f"No project with id {project_id}")
@@ -538,7 +565,8 @@ def list_projects(
     """
     init_db(db_path, sync_url=sync_url, auth_token=auth_token)
     with get_connection(db_path, sync_url=sync_url, auth_token=auth_token) as conn:
-        rows = conn.execute("SELECT name FROM projects ORDER BY name").fetchall()
+        cursor = conn.execute("SELECT name FROM projects ORDER BY name")
+        rows = [_row_as_dict(r, cursor) for r in cursor.fetchall()]
     return [row["name"] for row in rows]
 
 
@@ -691,14 +719,15 @@ def get_observations(
         All observations for the project, sorted chronologically.
     """
     with get_connection(db_path, sync_url=sync_url, auth_token=auth_token) as conn:
-        rows = conn.execute(
+        cursor = conn.execute(
             """
             SELECT * FROM observations
             WHERE project_id = ?
             ORDER BY timestamp
             """,
             (project_id,),
-        ).fetchall()
+        )
+        rows = [_row_as_dict(r, cursor) for r in cursor.fetchall()]
     return [_row_to_observation(row) for row in rows]
 
 
@@ -732,9 +761,10 @@ def get_observation(
         If no observation with the given ID exists.
     """
     with get_connection(db_path, sync_url=sync_url, auth_token=auth_token) as conn:
-        row = conn.execute(
+        cursor = conn.execute(
             "SELECT * FROM observations WHERE id = ?", (observation_id,)
-        ).fetchone()
+        )
+        row = _row_as_dict(cursor.fetchone(), cursor)
 
     if row is None:
         raise ValueError(f"No observation with id {observation_id}")
@@ -800,8 +830,9 @@ def count_observations(
         Number of observations recorded for the project.
     """
     with get_connection(db_path, sync_url=sync_url, auth_token=auth_token) as conn:
-        row = conn.execute(
+        cursor = conn.execute(
             "SELECT COUNT(*) as count FROM observations WHERE project_id = ?",
             (project_id,),
-        ).fetchone()
+        )
+        row = _row_as_dict(cursor.fetchone(), cursor)
     return row["count"]

@@ -33,6 +33,7 @@ dependencies = [
     "botorch>=0.14",
     "matplotlib>=3.7",
     "libsql>=0.1.0",
+    "python-dotenv>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -48,6 +49,9 @@ demos = [
     "ipykernel>=6.0",
     "nbconvert>=7.0",
     "tabulate>=0.9",
+]
+claudelight = [
+    "pyarrow>=14.0",
 ]
 
 [project.urls]
