@@ -11,6 +11,7 @@ from folio.core.observation import Observation
 from folio.core.project import Project
 from folio.core.schema import InputSpec, OutputSpec
 from folio.exceptions import (
+    CostLimitError,
     ExecutorError,
     InvalidInputError,
     InvalidOutputError,
@@ -21,6 +22,7 @@ from folio.exceptions import (
 from folio.executors import ClaudeLightExecutor, Executor, HumanExecutor
 from folio.recommenders.base import Recommender
 from folio.recommenders.bayesian import BayesianRecommender
+from folio.recommenders.initializer import LLMBackend
 from folio.recommenders.random import RandomRecommender
 
 
@@ -1340,3 +1342,228 @@ class TestExecutorIntegration:
         # (since higher temp = higher yield in our pattern)
         all_obs = folio.get_observations("improvement_test")
         assert len(all_obs) == 6  # 3 initial + 3 from execute
+
+
+class MockLLMBackend(LLMBackend):
+    """Mock LLM backend for testing without real API calls."""
+
+    def __init__(self, response: str | None = None) -> None:
+        """Initialize with optional canned response."""
+        import json
+
+        self._response = response or json.dumps(
+            [
+                {"temperature": 80.0, "pressure": 5.0},
+                {"temperature": 90.0, "pressure": 6.0},
+                {"temperature": 70.0, "pressure": 4.0},
+            ]
+        )
+
+    def complete(self, prompt: str) -> str:
+        """Return canned response."""
+        return self._response
+
+    def estimate_cost(self, prompt: str, max_output_tokens: int = 4096) -> float:
+        """Return fixed low cost."""
+        return 0.01
+
+
+class TestInitializeFromLLM:
+    """Tests for Folio.initialize_from_llm() method."""
+
+    def test_initialize_from_llm_returns_suggestions(
+        self, folio, sample_inputs, sample_outputs, sample_target_configs
+    ):
+        """Initialize returns list of suggestion dicts."""
+        folio.create_project(
+            name="llm_init_test",
+            inputs=sample_inputs,
+            outputs=sample_outputs,
+            target_configs=sample_target_configs,
+        )
+
+        mock_backend = MockLLMBackend()
+        suggestions = folio.initialize_from_llm(
+            "llm_init_test", n=3, backend=mock_backend
+        )
+
+        assert isinstance(suggestions, list)
+        assert len(suggestions) == 3
+        assert all(isinstance(s, dict) for s in suggestions)
+
+    def test_initialize_from_llm_respects_bounds(
+        self, folio, sample_inputs, sample_outputs, sample_target_configs
+    ):
+        """All suggestions are within project input bounds."""
+        folio.create_project(
+            name="bounds_test",
+            inputs=sample_inputs,
+            outputs=sample_outputs,
+            target_configs=sample_target_configs,
+        )
+
+        mock_backend = MockLLMBackend()
+        suggestions = folio.initialize_from_llm(
+            "bounds_test", n=3, backend=mock_backend
+        )
+
+        for suggestion in suggestions:
+            assert 20.0 <= suggestion["temperature"] <= 100.0
+            assert 1.0 <= suggestion["pressure"] <= 10.0
+
+    def test_initialize_from_llm_clamps_out_of_bounds(
+        self, folio, sample_inputs, sample_outputs, sample_target_configs
+    ):
+        """Out-of-bounds values are clamped to valid range."""
+        import json
+
+        folio.create_project(
+            name="clamp_test",
+            inputs=sample_inputs,
+            outputs=sample_outputs,
+            target_configs=sample_target_configs,
+        )
+
+        response = json.dumps([{"temperature": 200.0, "pressure": 0.5}])
+        mock_backend = MockLLMBackend(response)
+
+        suggestions = folio.initialize_from_llm("clamp_test", n=1, backend=mock_backend)
+
+        assert suggestions[0]["temperature"] == 100.0
+        assert suggestions[0]["pressure"] == 1.0
+
+    def test_initialize_from_llm_project_not_found(self, folio):
+        """Raises ProjectNotFoundError for nonexistent project."""
+        mock_backend = MockLLMBackend()
+
+        with pytest.raises(ProjectNotFoundError):
+            folio.initialize_from_llm("nonexistent_project", n=3, backend=mock_backend)
+
+    def test_initialize_from_llm_custom_backend(
+        self, folio, sample_inputs, sample_outputs, sample_target_configs
+    ):
+        """Accepts and uses custom LLMBackend."""
+        import json
+
+        folio.create_project(
+            name="custom_backend_test",
+            inputs=sample_inputs,
+            outputs=sample_outputs,
+            target_configs=sample_target_configs,
+        )
+
+        response = json.dumps([{"temperature": 85.0, "pressure": 7.0}])
+        custom_backend = MockLLMBackend(response)
+
+        suggestions = folio.initialize_from_llm(
+            "custom_backend_test", n=1, backend=custom_backend
+        )
+
+        assert suggestions[0]["temperature"] == 85.0
+        assert suggestions[0]["pressure"] == 7.0
+
+    def test_initialize_from_llm_custom_prompt(
+        self, folio, sample_inputs, sample_outputs, sample_target_configs
+    ):
+        """Accepts custom prompt template."""
+        folio.create_project(
+            name="custom_prompt_test",
+            inputs=sample_inputs,
+            outputs=sample_outputs,
+            target_configs=sample_target_configs,
+        )
+
+        custom_template = (
+            "Suggest {n} experiments. Goal: {objective}. "
+            "Params: {parameters}. Context: {description}"
+        )
+        mock_backend = MockLLMBackend()
+
+        suggestions = folio.initialize_from_llm(
+            "custom_prompt_test",
+            n=3,
+            backend=mock_backend,
+            prompt_template=custom_template,
+        )
+
+        assert len(suggestions) == 3
+
+    def test_initialize_from_llm_with_description(
+        self, folio, sample_inputs, sample_outputs, sample_target_configs
+    ):
+        """Description parameter is passed to initializer."""
+        folio.create_project(
+            name="description_test",
+            inputs=sample_inputs,
+            outputs=sample_outputs,
+            target_configs=sample_target_configs,
+        )
+
+        mock_backend = MockLLMBackend()
+        suggestions = folio.initialize_from_llm(
+            "description_test",
+            n=3,
+            description="Suzuki coupling optimization for biaryl synthesis",
+            backend=mock_backend,
+        )
+
+        assert len(suggestions) == 3
+
+    def test_full_workflow_with_llm_init(
+        self, folio, sample_inputs, sample_outputs, sample_target_configs
+    ):
+        """Full workflow: LLM init -> add observations -> BO suggest."""
+        folio.create_project(
+            name="workflow_test",
+            inputs=sample_inputs,
+            outputs=sample_outputs,
+            target_configs=sample_target_configs,
+        )
+
+        mock_backend = MockLLMBackend()
+        suggestions = folio.initialize_from_llm(
+            "workflow_test", n=3, backend=mock_backend
+        )
+
+        for i, suggestion in enumerate(suggestions):
+            folio.add_observation(
+                "workflow_test",
+                inputs=suggestion,
+                outputs={"yield": 70.0 + i * 5, "purity": 95.0},
+            )
+
+        bo_suggestions = folio.suggest("workflow_test")
+
+        assert len(bo_suggestions) == 1
+        assert "temperature" in bo_suggestions[0]
+        assert "pressure" in bo_suggestions[0]
+        assert 20.0 <= bo_suggestions[0]["temperature"] <= 100.0
+        assert 1.0 <= bo_suggestions[0]["pressure"] <= 10.0
+
+    def test_initialize_from_llm_cost_limit_exceeded(
+        self, folio, sample_inputs, sample_outputs, sample_target_configs
+    ):
+        """Raises CostLimitError when estimated cost exceeds limit."""
+
+        class ExpensiveBackend(MockLLMBackend):
+            def estimate_cost(
+                self, prompt: str, max_output_tokens: int = 4096
+            ) -> float:
+                return 10.00
+
+        folio.create_project(
+            name="cost_limit_test",
+            inputs=sample_inputs,
+            outputs=sample_outputs,
+            target_configs=sample_target_configs,
+        )
+
+        expensive_backend = ExpensiveBackend()
+
+        with pytest.raises(CostLimitError, match="exceeds limit"):
+            folio.initialize_from_llm(
+                "cost_limit_test",
+                n=3,
+                backend=expensive_backend,
+                max_cost_per_call=0.50,
+            )

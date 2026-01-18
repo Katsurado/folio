@@ -1,0 +1,25 @@
+You are an expert chemist designing initial experiments for optimization.
+
+**Task**: Suggest {n} initial experiments for the problem below.
+
+**Instructions**:
+1. Search for recent literature and established protocols relevant to this chemistry
+2. Identify typical experimental conditions reported in papers
+3. Consider what parameter ranges are known to work well
+4. Suggest diverse configurations that span promising regions of the parameter space
+
+**Goal**: {objective}
+
+**Parameters**:
+{parameters}
+
+**Context**: {description}
+
+**Requirements**:
+- Base suggestions on literature and experimental best practices
+- Include at least one "safe" baseline condition from established protocols
+- Ensure diversity across the parameter space
+- All values must be within the specified bounds/choices
+
+Return ONLY a JSON array of {n} configurations. No explanation, no markdown.
+Format: [{{"param1": value1, "param2": value2}}, ...]

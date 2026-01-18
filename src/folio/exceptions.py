@@ -54,3 +54,27 @@ class NotFittedError(SurrogateError):
 
 class ExecutorError(FolioError):
     """Raised when an executor fails to run an experiment."""
+
+
+class LLMResponseError(FolioError):
+    """Raised when LLM response cannot be parsed.
+
+    This error indicates that the LLM returned a response that could not be
+    parsed as valid JSON or did not match the expected format.
+
+    Examples
+    --------
+    >>> raise LLMResponseError("Expected JSON array, got plain text")
+    """
+
+
+class CostLimitError(FolioError):
+    """Raised when estimated LLM API cost exceeds the configured limit.
+
+    This error is raised before making an API call if the estimated cost
+    would exceed the max_cost_per_call limit set on the LLMInitializer.
+
+    Examples
+    --------
+    >>> raise CostLimitError("Estimated cost $0.75 exceeds limit $0.50")
+    """

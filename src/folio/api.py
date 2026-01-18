@@ -1,5 +1,7 @@
 """High-level API for Folio electronic lab notebook."""
 
+from __future__ import annotations
+
 import logging
 import time
 from pathlib import Path
@@ -13,6 +15,7 @@ from folio.core.schema import InputSpec, OutputSpec
 from folio.exceptions import ExecutorError
 from folio.executors import ClaudeLightExecutor, Executor, HumanExecutor
 from folio.recommenders import BayesianRecommender, RandomRecommender, Recommender
+from folio.recommenders.initializer import LLMBackend, LLMInitializer, OpenAIBackend
 
 logger = logging.getLogger(__name__)
 
@@ -644,3 +647,103 @@ class Folio:
             time.sleep(wait_between_runs)
 
         return observations
+
+    def initialize_from_llm(
+        self,
+        project_name: str,
+        n: int = 5,
+        description: str | None = None,
+        backend: LLMBackend | None = None,
+        prompt_template: str | Path | None = None,
+        max_cost_per_call: float = 0.50,
+    ) -> list[dict]:
+        """Suggest initial experiments using LLM with literature search.
+
+        Uses a large language model with web search capability to suggest
+        initial experiments based on scientific literature and best practices.
+        This is useful for starting an optimization campaign with informed
+        initial conditions rather than random sampling.
+
+        Parameters
+        ----------
+        project_name : str
+            Name of the project to initialize.
+        n : int, optional
+            Number of initial experiments to suggest. Defaults to 5.
+        description : str | None, optional
+            Natural language description providing additional context for
+            the LLM (e.g., reaction type, constraints, prior knowledge).
+        backend : LLMBackend | None, optional
+            LLM backend to use. Defaults to OpenAIBackend() which uses
+            the OPENAI_API_KEY environment variable.
+        prompt_template : str | Path | None, optional
+            Custom prompt template. If None, uses the default template.
+            If Path, loads template from file. If str, uses directly.
+        max_cost_per_call : float, optional
+            Maximum allowed cost per API call in USD. Defaults to 0.50.
+            Raises CostLimitError if estimated cost exceeds this limit.
+
+        Returns
+        -------
+        list[dict]
+            List of suggested input configurations. Each dict maps input
+            names to suggested values within the project's bounds.
+
+        Raises
+        ------
+        ProjectNotFoundError
+            If no project with the given name exists.
+        CostLimitError
+            If estimated API cost exceeds max_cost_per_call.
+        LLMResponseError
+            If LLM response cannot be parsed as valid suggestions.
+        ValueError
+            If OpenAI API key is not configured (when using default backend).
+
+        Examples
+        --------
+        Basic usage with default OpenAI backend:
+
+        >>> folio = Folio("my_experiments.db")
+        >>> suggestions = folio.initialize_from_llm("polymer_optimization", n=5)
+        >>> for s in suggestions:
+        ...     result = run_experiment(s)
+        ...     folio.add_observation("polymer_optimization", inputs=s, outputs=result)
+
+        With custom description for better context:
+
+        >>> suggestions = folio.initialize_from_llm(
+        ...     "suzuki_coupling",
+        ...     n=3,
+        ...     description="Pd-catalyzed cross-coupling for biaryl synthesis. "
+        ...                 "Using aryl bromide and phenylboronic acid.",
+        ... )
+
+        With custom prompt template:
+
+        >>> suggestions = folio.initialize_from_llm(
+        ...     "my_project",
+        ...     n=5,
+        ...     prompt_template=Path("custom_prompt.txt"),
+        ...     max_cost_per_call=1.00,
+        ... )
+
+        Notes
+        -----
+        - Requires OPENAI_API_KEY environment variable for default backend
+        - Web search is enabled by default for literature-informed suggestions
+        - Cost estimation is performed before API call to prevent unexpected charges
+        - Suggested values are validated against project schema and clamped to bounds
+        """
+        project = self.get_project(project_name)
+
+        if backend is None:
+            backend = OpenAIBackend()
+
+        initializer = LLMInitializer(
+            backend=backend,
+            prompt_template=prompt_template,
+            max_cost_per_call=max_cost_per_call,
+        )
+
+        return initializer.suggest(project, n=n, description=description)
