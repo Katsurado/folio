@@ -57,7 +57,6 @@ Two interfaces:
 ## v1.1 Scope (Post-MVP)
 
 - **KABO Embeddings**: Categorical inputs → LLM description → embedding → PCA → latent GP
-- **LLM-informed initialization**: Query LLM for literature-based starting conditions before BO
 
 ## Development Workflow
 
@@ -137,7 +136,11 @@ src/folio/
 │   ├── base.py         # Recommender ABC with recommend() and recommend_from_data()
 │   ├── bayesian.py     # BayesianRecommender (GP + acquisition optimization)
 │   ├── random.py       # RandomRecommender (uniform sampling)
-│   └── acquisitions/   # Acquisition functions (EI, UCB) - internal to recommenders
+│   ├── acquisitions/   # Acquisition functions (EI, UCB) - internal to recommenders
+│   └── initializer/    # LLM-based initialization for starting experiments
+│       ├── base.py     # Initializer ABC
+│       ├── llm.py      # LLMBackend, OpenAIBackend, LLMInitializer
+│       └── prompts/    # Prompt templates
 ├── surrogates/
 │   ├── base.py         # Surrogate ABC
 │   ├── gp.py           # SingleTaskGPSurrogate (BoTorch, single-output GP)
@@ -165,6 +168,55 @@ Note: `targets/` uses `TYPE_CHECKING` for `Observation` imports to avoid circula
 - **TaskStandardize**: BoTorch OutcomeTransform for per-task standardization in MultiTaskGP. Solves scale imbalance when objectives have different magnitudes (e.g., MW ~10^5 vs PDI ~1-3).
 - **Acquisition**: Single-objective (EI, UCB) and multi-objective (NEHVI). Internal to recommenders.
 - **Executor**: Runs experiments. HumanExecutor for manual, ClaudeLightExecutor for autonomous closed-loop
+- **Initializer**: Suggests initial experiments before BO. LLMInitializer uses LLM with web search for literature-informed starting points.
+
+## LLM Initialization
+
+Get literature-informed starting conditions before running Bayesian optimization.
+
+```python
+# Basic usage - uses OpenAI API with web search
+suggestions = folio.initialize_from_llm(
+    "my_project",
+    n=5,
+    description="Optimizing a Suzuki coupling reaction with Pd catalyst",
+)
+# Output: Model: gpt-5.2, Estimated cost: $0.0xxx
+
+# Run the suggested experiments
+for s in suggestions:
+    result = run_experiment(s)
+    folio.add_observation("my_project", inputs=s, outputs=result)
+
+# Continue with BO
+for _ in range(10):
+    suggestion = folio.suggest("my_project")[0]
+    # ...
+```
+
+### Custom Backend
+
+```python
+from folio.recommenders.initializer import OpenAIBackend, LLMInitializer
+
+# Use a different model
+backend = OpenAIBackend(model="gpt-4.1-mini")  # Cheaper
+suggestions = folio.initialize_from_llm("my_project", n=5, backend=backend)
+```
+
+### Model Pricing
+
+OpenAIBackend has model-specific pricing ($/1M tokens):
+
+| Model | Input | Output |
+|-------|-------|--------|
+| gpt-5.2 | $1.75 | $14.00 |
+| gpt-5.2-mini | $0.30 | $1.25 |
+| gpt-4.1 | $2.00 | $8.00 |
+| gpt-4.1-mini | $0.40 | $1.60 |
+| gpt-4o | $2.50 | $10.00 |
+
+Plus $0.01 per web search call.
 
 ## Executor Interface
 
@@ -397,12 +449,19 @@ with pytest.raises(ValueError, match="Array shapes must match exactly"):
   - [x] Executor ABC with execute() and _run()
   - [x] HumanExecutor: interactive CLI prompts for manual experiments
   - [x] ClaudeLightExecutor: autonomous closed-loop via API
+- [x] LLM-informed initialization
+  - [x] Initializer ABC with suggest() method
+  - [x] LLMBackend ABC for pluggable LLM providers
+  - [x] OpenAIBackend with web search and model-specific pricing
+  - [x] LLMInitializer with cost estimation, bounds validation, JSON parsing
+  - [x] folio.initialize_from_llm() API method
 - [x] Demos (AI-generated, synthetic data)
   - [x] Quickstart, multi-objective, lab workflow, edge cases
   - [x] Custom surrogates/acquisitions/recommenders demo
   - [x] Quarto report templates (polymer optimization, iridium sensor)
   - [x] Custom target extensions (R2Target, SternVolmerTargets)
   - [x] Executors demo (automated closed-loop optimization)
+  - [x] LLM initialization demo with random init comparison
 - [x] CI/CD
   - [x] Cross-platform testing (Ubuntu, macOS, Windows)
   - [x] Pre-commit hooks (black, ruff, nbstripout)
