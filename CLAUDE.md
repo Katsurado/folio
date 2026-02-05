@@ -163,7 +163,7 @@ Note: `targets/` uses `TYPE_CHECKING` for `Observation` imports to avoid circula
 - **Project**: Experiment schema (inputs, outputs, target_configs list, reference_point, recommender_config). Supports single and multi-objective via `is_multi_objective()`.
 - **Observation**: Single data point (inputs dict, outputs dict, timestamp, notes, tag, images, failed)
 - **Target**: Extracts scalar optimization target from Observation (direct or derived from outputs)
-- **Recommender**: Suggests next experiments. Interface: `recommend(observations) → dict`, `recommend_from_data(X, y, bounds, maximize) → np.ndarray` where `maximize: list[bool]`. Implementations: BayesianRecommender, RandomRecommender
+- **Recommender**: Suggests next experiments. Interface: `recommend(observations, fixed_inputs) → dict`, `recommend_from_data(X, y, bounds, maximize, fixed_feature_indices, fixed_feature_values) → np.ndarray`. Implementations: BayesianRecommender, RandomRecommender
 - **Surrogate**: Model that fits observations. Interface: `fit(X, y)`, `predict(X) → (mean, std)`. SingleTaskGPSurrogate for single-output (y shape (n, 1)), MultiTaskGPSurrogate for correlated multi-output.
 - **TaskStandardize**: BoTorch OutcomeTransform for per-task standardization in MultiTaskGP. Solves scale imbalance when objectives have different magnitudes (e.g., MW ~10^5 vs PDI ~1-3).
 - **Acquisition**: Single-objective (EI, UCB) and multi-objective (NEHVI). Internal to recommenders.
@@ -296,6 +296,59 @@ User enters observation (inputs, outputs)
     Loop
 ```
 
+## Non-Optimizable Inputs
+
+Some experiments have context variables (time-of-day, ambient temperature, weather) that affect outcomes but cannot be controlled. These are **non-optimizable inputs**:
+
+- Recorded in observations and included in GP training (model learns their effect)
+- Held fixed during acquisition optimization (not searched over)
+- Not included in suggestions returned by `recommend()`/`suggest()`
+
+### Usage
+
+```python
+# Define project with non-optimizable inputs
+project = folio.create_project(
+    name="claude_light",
+    inputs=[
+        InputSpec("R", "continuous", bounds=(0.0, 255.0)),  # optimizable (default)
+        InputSpec("G", "continuous", bounds=(0.0, 255.0)),
+        InputSpec("B", "continuous", bounds=(0.0, 255.0)),
+        InputSpec("hour", "continuous", bounds=(0.0, 24.0), optimizable=False),
+        InputSpec("temp", "continuous", bounds=(15.0, 35.0), optimizable=False),
+    ],
+    outputs=[OutputSpec("intensity")],
+    target_configs=[TargetConfig("intensity", objective_mode="maximize")],
+)
+
+# Record observations with all inputs (including context)
+folio.add_observation("claude_light", inputs={
+    "R": 128.0, "G": 64.0, "B": 200.0,
+    "hour": 14.0, "temp": 22.0,
+}, outputs={"intensity": 0.75})
+
+# Get suggestion: must provide current context values
+suggestion = folio.suggest("claude_light", fixed_inputs={"hour": 10.0, "temp": 25.0})
+# Returns: [{"R": 180.0, "G": 90.0, "B": 150.0}]  (only optimizable inputs)
+
+# Run experiment with suggestion + current context
+folio.add_observation("claude_light", inputs={
+    **suggestion[0],
+    "hour": 10.0, "temp": 25.0,
+}, outputs={"intensity": 0.82})
+```
+
+### Low-Level API
+
+```python
+# recommend_from_data accepts fixed feature indices/values
+recommender.recommend_from_data(
+    X, y, bounds, maximize,
+    fixed_feature_indices=[3, 4],  # indices of hour, temp in X
+    fixed_feature_values=[10.0, 25.0],  # current context values
+)
+```
+
 ## Coding Conventions
 
 - Python 3.10+
@@ -415,7 +468,7 @@ with pytest.raises(ValueError, match="Array shapes must match exactly"):
 
 - [x] Project skeleton
 - [x] Data layer (Project, Observation, SQLite CRUD)
-  - [x] Schema: InputSpec, OutputSpec with validation
+  - [x] Schema: InputSpec (with `optimizable` field), OutputSpec with validation
   - [x] Observation with validation, timestamp default, tag, notes
   - [x] Project with target_configs (list), reference_point, recommender_config
   - [x] Project.is_multi_objective() for single vs multi-objective detection
@@ -435,10 +488,11 @@ with pytest.raises(ValueError, match="Array shapes must match exactly"):
   - [x] Recommender ABC with recommend() and recommend_from_data()
   - [x] RandomRecommender: uniform sampling within bounds
   - [x] BayesianRecommender: GP surrogate + acquisition optimization
+  - [x] Non-optimizable inputs: context variables fixed during optimization
 - [x] Folio API (high-level user interface)
   - [x] Project CRUD: create_project, list_projects, delete_project, get_project
   - [x] Observation CRUD: add_observation, delete_observation, get_observations (with tag filter)
-  - [x] Recommendation: suggest() returns list[dict] for batch support
+  - [x] Recommendation: suggest(fixed_inputs) returns list[dict] for batch support
   - [x] Recommender caching: _recommenders dict, _build_recommender, get_recommender
   - [x] Executor support: build_executor(), execute() for automated loops
 - [x] libSQL cloud sync support in Database

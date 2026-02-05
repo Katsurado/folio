@@ -14,6 +14,7 @@ Record results → Folio suggests next experiment → Run it → Repeat
 
 - **Simple data entry**: Python API (Streamlit GUI coming soon)
 - **Smart suggestions**: Bayesian optimization (single and multi-objective)
+- **Context-aware**: Non-optimizable inputs (time, weather) are learned but not searched
 - **Closed-loop automation**: Executors for human-in-the-loop or fully autonomous experiments
 - **Cloud sync**: libSQL support for distributed collaboration
 - **Flexible**: Define your own inputs, outputs, and optimization targets
@@ -99,6 +100,32 @@ observations = folio.execute(
 Built-in executors:
 - `HumanExecutor`: Interactive CLI prompts for manual experiments
 - `ClaudeLightExecutor`: Fully autonomous via Claude-Light API
+
+## Context Variables (Non-Optimizable Inputs)
+
+Some variables affect outcomes but can't be controlled (time of day, weather). Mark them as non-optimizable to include them in the model without searching over them:
+
+```python
+folio.create_project(
+    name="outdoor_experiment",
+    inputs=[
+        InputSpec("concentration", "continuous", bounds=(0.1, 1.0)),  # optimizable
+        InputSpec("hour", "continuous", bounds=(0, 24), optimizable=False),  # context
+        InputSpec("temperature", "continuous", bounds=(15, 35), optimizable=False),
+    ],
+    outputs=[OutputSpec("yield")],
+    target_configs=[TargetConfig("yield", objective_mode="maximize")],
+)
+
+# Record with all inputs
+folio.add_observation("outdoor_experiment",
+    inputs={"concentration": 0.5, "hour": 14, "temperature": 25},
+    outputs={"yield": 0.8})
+
+# Suggest: provide current context, get only controllable inputs back
+suggestion = folio.suggest("outdoor_experiment", fixed_inputs={"hour": 10, "temperature": 22})
+# [{"concentration": 0.73}]
+```
 
 ## Demos
 
