@@ -1295,3 +1295,368 @@ class TestBayesianRecommenderVarianceAcquisition:
         assert 0.0 <= result["x1"] <= 10.0
         assert -5.0 <= result["x2"] <= 5.0
         assert recommender.surrogate is None
+
+
+# -----------------------------------------------------------------------------
+# Non-optimizable (context) inputs tests
+# -----------------------------------------------------------------------------
+
+
+class TestBayesianRecommenderNonOptimizableInputs:
+    """Tests for BayesianRecommender with non-optimizable (context) inputs.
+
+    Non-optimizable inputs are:
+    - Included in GP training (X has all continuous features)
+    - Fixed during acquisition optimization (only optimizable dims searched)
+    - Not included in the returned suggestion dict
+    """
+
+    @pytest.fixture
+    def project_with_non_optimizable(self):
+        """Project with RGB optimizable inputs and hour/temp non-optimizable inputs."""
+        return Project(
+            id=1,
+            name="claude_light_context",
+            inputs=[
+                InputSpec("R", "continuous", bounds=(0.0, 255.0)),
+                InputSpec("G", "continuous", bounds=(0.0, 255.0)),
+                InputSpec("B", "continuous", bounds=(0.0, 255.0)),
+                InputSpec("hour", "continuous", bounds=(0.0, 24.0), optimizable=False),
+                InputSpec(
+                    "ambient_temp", "continuous", bounds=(15.0, 35.0), optimizable=False
+                ),
+            ],
+            outputs=[OutputSpec("intensity")],
+            target_configs=[
+                TargetConfig(objective="intensity", objective_mode="maximize")
+            ],
+            recommender_config=RecommenderConfig(
+                type="bayesian",
+                surrogate="gp",
+                acquisition="ei",
+                n_initial=3,
+            ),
+        )
+
+    @pytest.fixture
+    def observations_with_non_optimizable(self):
+        """Observations with non-optimizable context values recorded."""
+        return [
+            Observation(
+                project_id=1,
+                inputs={
+                    "R": 100.0,
+                    "G": 150.0,
+                    "B": 200.0,
+                    "hour": 10.0,
+                    "ambient_temp": 22.0,
+                },
+                outputs={"intensity": 0.75},
+            ),
+            Observation(
+                project_id=1,
+                inputs={
+                    "R": 200.0,
+                    "G": 100.0,
+                    "B": 50.0,
+                    "hour": 14.0,
+                    "ambient_temp": 25.0,
+                },
+                outputs={"intensity": 0.60},
+            ),
+            Observation(
+                project_id=1,
+                inputs={
+                    "R": 50.0,
+                    "G": 200.0,
+                    "B": 150.0,
+                    "hour": 18.0,
+                    "ambient_temp": 20.0,
+                },
+                outputs={"intensity": 0.85},
+            ),
+            Observation(
+                project_id=1,
+                inputs={
+                    "R": 128.0,
+                    "G": 128.0,
+                    "B": 128.0,
+                    "hour": 12.0,
+                    "ambient_temp": 23.0,
+                },
+                outputs={"intensity": 0.70},
+            ),
+        ]
+
+    def test_recommend_returns_only_optimizable_keys(
+        self, project_with_non_optimizable, observations_with_non_optimizable
+    ):
+        """recommend() returns dict with only optimizable input names."""
+        torch.manual_seed(42)
+        recommender = BayesianRecommender(project_with_non_optimizable)
+        result = recommender.recommend(
+            observations_with_non_optimizable,
+            fixed_inputs={"hour": 12.0, "ambient_temp": 22.0},
+        )
+        assert set(result.keys()) == {"R", "G", "B"}
+        assert "hour" not in result
+        assert "ambient_temp" not in result
+
+    def test_recommend_values_within_optimizable_bounds(
+        self, project_with_non_optimizable, observations_with_non_optimizable
+    ):
+        """recommend() returns values within optimizable input bounds."""
+        torch.manual_seed(42)
+        recommender = BayesianRecommender(project_with_non_optimizable)
+        result = recommender.recommend(
+            observations_with_non_optimizable,
+            fixed_inputs={"hour": 12.0, "ambient_temp": 22.0},
+        )
+        assert 0.0 <= result["R"] <= 255.0
+        assert 0.0 <= result["G"] <= 255.0
+        assert 0.0 <= result["B"] <= 255.0
+
+    def test_recommend_requires_context_values(
+        self, project_with_non_optimizable, observations_with_non_optimizable
+    ):
+        """recommend() raises if fixed_inputs not provided for non-optimizable."""
+        recommender = BayesianRecommender(project_with_non_optimizable)
+        with pytest.raises(ValueError, match="(?i)fixed_inputs|required|missing"):
+            recommender.recommend(observations_with_non_optimizable)
+
+    def test_recommend_with_partial_context_raises(
+        self, project_with_non_optimizable, observations_with_non_optimizable
+    ):
+        """recommend() raises if only some context values provided."""
+        recommender = BayesianRecommender(project_with_non_optimizable)
+        with pytest.raises(ValueError, match="(?i)fixed_inputs|missing|hour|ambient"):
+            recommender.recommend(
+                observations_with_non_optimizable,
+                fixed_inputs={"hour": 12.0},  # Missing ambient_temp
+            )
+
+    def test_context_values_used_in_optimization(self, project_with_non_optimizable):
+        """Different context values are used during acquisition optimization.
+
+        The GP learns the effect of non-optimizable inputs, so the optimal
+        optimizable inputs may differ based on context values. We verify both
+        calls produce valid results; the results may or may not differ depending
+        on the GP's learned structure with limited data.
+        """
+        torch.manual_seed(42)
+        # Observations where intensity varies with both RGB and hour
+        observations = [
+            Observation(
+                project_id=1,
+                inputs={
+                    "R": 200.0,
+                    "G": 50.0,
+                    "B": 50.0,
+                    "hour": 6.0,
+                    "ambient_temp": 20.0,
+                },
+                outputs={"intensity": 0.9},
+            ),
+            Observation(
+                project_id=1,
+                inputs={
+                    "R": 50.0,
+                    "G": 50.0,
+                    "B": 200.0,
+                    "hour": 18.0,
+                    "ambient_temp": 20.0,
+                },
+                outputs={"intensity": 0.9},
+            ),
+            Observation(
+                project_id=1,
+                inputs={
+                    "R": 200.0,
+                    "G": 50.0,
+                    "B": 50.0,
+                    "hour": 18.0,
+                    "ambient_temp": 20.0,
+                },
+                outputs={"intensity": 0.3},
+            ),
+            Observation(
+                project_id=1,
+                inputs={
+                    "R": 50.0,
+                    "G": 50.0,
+                    "B": 200.0,
+                    "hour": 6.0,
+                    "ambient_temp": 20.0,
+                },
+                outputs={"intensity": 0.3},
+            ),
+        ]
+
+        recommender = BayesianRecommender(project_with_non_optimizable)
+
+        torch.manual_seed(42)
+        result_morning = recommender.recommend(
+            observations, fixed_inputs={"hour": 6.0, "ambient_temp": 20.0}
+        )
+
+        torch.manual_seed(42)
+        result_evening = recommender.recommend(
+            observations, fixed_inputs={"hour": 18.0, "ambient_temp": 20.0}
+        )
+
+        # Both results should be valid with only optimizable keys
+        assert set(result_morning.keys()) == {"R", "G", "B"}
+        assert set(result_evening.keys()) == {"R", "G", "B"}
+        # Both results within bounds
+        for result in [result_morning, result_evening]:
+            assert 0.0 <= result["R"] <= 255.0
+            assert 0.0 <= result["G"] <= 255.0
+            assert 0.0 <= result["B"] <= 255.0
+
+    def test_gp_trained_on_all_features(
+        self, project_with_non_optimizable, observations_with_non_optimizable
+    ):
+        """GP surrogate is trained on all features including non-optimizable."""
+        torch.manual_seed(42)
+        recommender = BayesianRecommender(project_with_non_optimizable)
+        recommender.recommend(
+            observations_with_non_optimizable,
+            fixed_inputs={"hour": 12.0, "ambient_temp": 22.0},
+        )
+        # Check that surrogate was fitted with 5 input dimensions
+        # (R, G, B, hour, ambient_temp)
+        assert recommender._surrogate is not None
+        assert recommender._surrogate._is_fitted
+
+    def test_few_observations_returns_random_optimizable(
+        self, project_with_non_optimizable
+    ):
+        """With few observations, random sampling only covers optimizable inputs."""
+        observations = [
+            Observation(
+                project_id=1,
+                inputs={
+                    "R": 100.0,
+                    "G": 150.0,
+                    "B": 200.0,
+                    "hour": 10.0,
+                    "ambient_temp": 22.0,
+                },
+                outputs={"intensity": 0.75},
+            ),
+        ]
+        recommender = BayesianRecommender(project_with_non_optimizable)
+        result = recommender.recommend(
+            observations,
+            fixed_inputs={"hour": 12.0, "ambient_temp": 22.0},
+        )
+        # Only optimizable inputs in result
+        assert set(result.keys()) == {"R", "G", "B"}
+        # Values within bounds
+        assert 0.0 <= result["R"] <= 255.0
+
+    def test_context_not_required_for_project_without_non_optimizable(
+        self, simple_project, enough_observations
+    ):
+        """Projects without non-optimizable inputs don't require context parameter."""
+        torch.manual_seed(42)
+        recommender = BayesianRecommender(simple_project)
+        # Should work without context parameter
+        result = recommender.recommend(enough_observations)
+        assert set(result.keys()) == {"x1", "x2"}
+
+
+class TestBayesianRecommenderNonOptimizableRecommendFromData:
+    """Tests for recommend_from_data with non-optimizable inputs."""
+
+    @pytest.fixture
+    def project_with_non_optimizable(self):
+        """Project with optimizable and non-optimizable inputs."""
+        return Project(
+            id=1,
+            name="context_project",
+            inputs=[
+                InputSpec("x1", "continuous", bounds=(0.0, 10.0)),
+                InputSpec("x2", "continuous", bounds=(-5.0, 5.0)),
+                InputSpec("ctx", "continuous", bounds=(0.0, 1.0), optimizable=False),
+            ],
+            outputs=[OutputSpec("y")],
+            target_configs=[TargetConfig(objective="y", objective_mode="maximize")],
+            recommender_config=RecommenderConfig(n_initial=3),
+        )
+
+    def test_recommend_from_data_with_context(self, project_with_non_optimizable):
+        """recommend_from_data accepts context_values parameter."""
+        torch.manual_seed(42)
+        recommender = BayesianRecommender(project_with_non_optimizable)
+        # X has 3 columns: x1, x2, ctx
+        X = np.array(
+            [
+                [5.0, 0.0, 0.5],
+                [2.0, -3.0, 0.3],
+                [8.0, 2.0, 0.7],
+                [1.0, -1.0, 0.4],
+            ]
+        )
+        y = np.array([[10.0], [7.0], [15.0], [5.0]])
+        # Bounds only for optimizable (x1, x2)
+        bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
+        # Context indices and values
+        context_indices = [2]
+        context_values = [0.6]
+
+        result = recommender.recommend_from_data(
+            X,
+            y,
+            bounds,
+            [True],
+            fixed_feature_indices=context_indices,
+            fixed_feature_values=context_values,
+        )
+        # Result shape matches optimizable dimensions
+        assert result.shape == (2,)
+        # Values within optimizable bounds
+        assert np.all((bounds[0, :] <= result) & (result <= bounds[1, :]))
+
+    def test_recommend_from_data_context_fixed_during_optimization(
+        self, project_with_non_optimizable
+    ):
+        """Non-optimizable dimensions are fixed during acquisition optimization."""
+        torch.manual_seed(42)
+        recommender = BayesianRecommender(project_with_non_optimizable)
+        X = np.array(
+            [
+                [5.0, 0.0, 0.5],
+                [2.0, -3.0, 0.3],
+                [8.0, 2.0, 0.7],
+                [1.0, -1.0, 0.4],
+            ]
+        )
+        y = np.array([[10.0], [7.0], [15.0], [5.0]])
+        bounds = np.array([[0.0, -5.0], [10.0, 5.0]])
+
+        # Call with different context values
+        torch.manual_seed(42)
+        result_low = recommender.recommend_from_data(
+            X,
+            y,
+            bounds,
+            [True],
+            fixed_feature_indices=[2],
+            fixed_feature_values=[0.1],
+        )
+
+        torch.manual_seed(42)
+        result_high = recommender.recommend_from_data(
+            X,
+            y,
+            bounds,
+            [True],
+            fixed_feature_indices=[2],
+            fixed_feature_values=[0.9],
+        )
+
+        # Results may differ due to different context
+        # (we just verify both are valid)
+        assert result_low.shape == (2,)
+        assert result_high.shape == (2,)

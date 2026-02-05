@@ -83,3 +83,56 @@ class TestConstantSpec:
         assert spec.name == "catalyst"
         assert spec.value == "Pd/C"
         assert spec.units is None
+
+
+class TestInputSpecOptimizable:
+    """Tests for InputSpec optimizable flag.
+
+    Non-optimizable inputs (optimizable=False) are recorded and included in GP
+    fitting but excluded from acquisition function optimization. Use case:
+    time-of-day, weather data in Claude-Light where the GP learns their effect
+    but optimization only searches over optimizable inputs (R, G, B).
+    """
+
+    def test_optimizable_defaults_to_true(self):
+        """InputSpec.optimizable defaults to True for backward compatibility."""
+        spec = InputSpec(name="temperature", type="continuous", bounds=(20.0, 100.0))
+        assert spec.optimizable is True
+
+    def test_optimizable_can_be_set_false(self):
+        """InputSpec.optimizable can be explicitly set to False."""
+        spec = InputSpec(
+            name="time_of_day",
+            type="continuous",
+            bounds=(0.0, 24.0),
+            optimizable=False,
+        )
+        assert spec.optimizable is False
+
+    def test_non_optimizable_continuous_requires_bounds(self):
+        """Non-optimizable inputs still require bounds for validation."""
+        with pytest.raises(InvalidSchemaError, match="requires bounds"):
+            InputSpec(name="ambient_temp", type="continuous", optimizable=False)
+
+    def test_non_optimizable_with_valid_bounds(self):
+        """Non-optimizable input with valid bounds is accepted."""
+        spec = InputSpec(
+            name="humidity",
+            type="continuous",
+            bounds=(0.0, 100.0),
+            units="%",
+            optimizable=False,
+        )
+        assert spec.name == "humidity"
+        assert spec.type == "continuous"
+        assert spec.bounds == (0.0, 100.0)
+        assert spec.optimizable is False
+
+    def test_optimizable_and_non_optimizable_inputs_coexist(self):
+        """Both optimizable and non-optimizable inputs can be created."""
+        optimizable = InputSpec("R", "continuous", bounds=(0, 255))
+        non_optimizable = InputSpec(
+            "hour", "continuous", bounds=(0.0, 24.0), optimizable=False
+        )
+        assert optimizable.optimizable is True
+        assert non_optimizable.optimizable is False

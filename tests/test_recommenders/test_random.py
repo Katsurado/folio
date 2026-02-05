@@ -426,3 +426,96 @@ class TestRandomRecommenderMultiObjective:
         assert set(result.keys()) == {"x1", "x2"}
         assert 0.0 <= result["x1"] <= 10.0
         assert -5.0 <= result["x2"] <= 5.0
+
+
+# -----------------------------------------------------------------------------
+# Non-optimizable (context) inputs tests
+# -----------------------------------------------------------------------------
+
+
+class TestRandomRecommenderNonOptimizableInputs:
+    """Tests for RandomRecommender with non-optimizable (context) inputs.
+
+    Non-optimizable inputs should be excluded from random sampling - the
+    recommender only samples over optimizable dimensions.
+    """
+
+    @pytest.fixture
+    def project_with_non_optimizable(self):
+        """Project with optimizable and non-optimizable inputs."""
+        return Project(
+            id=1,
+            name="context_project",
+            inputs=[
+                InputSpec("R", "continuous", bounds=(0.0, 255.0)),
+                InputSpec("G", "continuous", bounds=(0.0, 255.0)),
+                InputSpec("B", "continuous", bounds=(0.0, 255.0)),
+                InputSpec("hour", "continuous", bounds=(0.0, 24.0), optimizable=False),
+                InputSpec("temp", "continuous", bounds=(15.0, 35.0), optimizable=False),
+            ],
+            outputs=[OutputSpec("intensity")],
+            target_configs=[TargetConfig(objective="intensity")],
+            recommender_config=RecommenderConfig(type="random"),
+        )
+
+    def test_recommend_returns_only_optimizable_keys(
+        self, project_with_non_optimizable
+    ):
+        """recommend() returns dict with only optimizable input names."""
+        recommender = RandomRecommender(project_with_non_optimizable)
+        result = recommender.recommend([], fixed_inputs={"hour": 12.0, "temp": 22.0})
+        assert set(result.keys()) == {"R", "G", "B"}
+        assert "hour" not in result
+        assert "temp" not in result
+
+    def test_recommend_values_within_optimizable_bounds(
+        self, project_with_non_optimizable
+    ):
+        """recommend() returns values within optimizable input bounds."""
+        recommender = RandomRecommender(project_with_non_optimizable)
+        for _ in range(20):
+            result = recommender.recommend(
+                [], fixed_inputs={"hour": 12.0, "temp": 22.0}
+            )
+            assert 0.0 <= result["R"] <= 255.0
+            assert 0.0 <= result["G"] <= 255.0
+            assert 0.0 <= result["B"] <= 255.0
+
+    def test_recommend_from_data_samples_optimizable_only(
+        self, project_with_non_optimizable
+    ):
+        """recommend_from_data() samples only optimizable dimensions."""
+        recommender = RandomRecommender(project_with_non_optimizable)
+        # Bounds only for optimizable (R, G, B)
+        bounds = np.array([[0.0, 0.0, 0.0], [255.0, 255.0, 255.0]])
+        result = recommender.recommend_from_data(
+            X=np.empty((0, 5)),  # 5 total features in training
+            y=np.empty(0),
+            bounds=bounds,  # Only 3 optimizable
+            maximize=[True],
+        )
+        # Result matches optimizable dimensions
+        assert result.shape == (3,)
+        assert np.all((bounds[0, :] <= result) & (result <= bounds[1, :]))
+
+    def test_non_optimizable_ignored_for_sampling(self, project_with_non_optimizable):
+        """Non-optimizable values don't affect random sampling."""
+        recommender = RandomRecommender(project_with_non_optimizable)
+        observations = [
+            Observation(
+                project_id=1,
+                inputs={
+                    "R": 100.0,
+                    "G": 150.0,
+                    "B": 200.0,
+                    "hour": 10.0,
+                    "temp": 22.0,
+                },
+                outputs={"intensity": 0.75},
+            ),
+        ]
+        result = recommender.recommend(
+            observations, fixed_inputs={"hour": 12.0, "temp": 22.0}
+        )
+        # Still only optimizable keys
+        assert set(result.keys()) == {"R", "G", "B"}

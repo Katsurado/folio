@@ -129,6 +129,8 @@ class BayesianRecommender(Recommender):
         y: np.ndarray,
         bounds: np.ndarray,
         maximize: list[bool],
+        fixed_feature_indices: list[int] | None = None,
+        fixed_feature_values: list[float] | None = None,
     ) -> np.ndarray:
         """Suggest next experiment inputs from raw arrays.
 
@@ -138,21 +140,26 @@ class BayesianRecommender(Recommender):
 
         Parameters
         ----------
-        X : np.ndarray, shape (n_samples, n_features)
-            Training inputs from previous experiments.
+        X : np.ndarray, shape (n_samples, n_all_features)
+            Training inputs from previous experiments. Includes both
+            optimizable and non-optimizable features.
         y : np.ndarray, shape (n_samples, n_objectives)
             Training targets. Shape (n, 1) for single-objective,
             (n, m) for m objectives.
-        bounds : np.ndarray, shape (2, n_features)
-            Bounds for each input dimension. Row 0 contains lower bounds,
-            row 1 contains upper bounds (BoTorch format).
+        bounds : np.ndarray, shape (2, n_optimizable_features)
+            Bounds for optimizable input dimensions only. Row 0 contains
+            lower bounds, row 1 contains upper bounds (BoTorch format).
         maximize : list[bool]
             Whether to maximize each objective. True = maximize, False = minimize.
+        fixed_feature_indices : list[int] | None, optional
+            Indices of non-optimizable features in the X array.
+        fixed_feature_values : list[float] | None, optional
+            Current values for non-optimizable features.
 
         Returns
         -------
-        np.ndarray, shape (n_features,)
-            Suggested input values for the next experiment.
+        np.ndarray, shape (n_optimizable_features,)
+            Suggested input values for optimizable features only.
 
         Examples
         --------
@@ -171,7 +178,9 @@ class BayesianRecommender(Recommender):
             return self.random_sample_from_bounds(bounds)
 
         self._fit_surrogate(X, y)
-        return self._optimize_acquisition(X, y, bounds, maximize)
+        return self._optimize_acquisition(
+            X, y, bounds, maximize, fixed_feature_indices, fixed_feature_values
+        )
 
     def _fit_surrogate(self, X: np.ndarray, y: np.ndarray) -> None:
         """Fit the GP surrogate model to training data.
@@ -213,6 +222,8 @@ class BayesianRecommender(Recommender):
         y: np.ndarray,
         bounds: np.ndarray,
         maximize: list[bool],
+        fixed_feature_indices: list[int] | None = None,
+        fixed_feature_values: list[float] | None = None,
     ) -> np.ndarray:
         """Optimize the acquisition function to find the next point.
 
@@ -221,20 +232,25 @@ class BayesianRecommender(Recommender):
 
         Parameters
         ----------
-        X : np.ndarray, shape (n_samples, n_features)
+        X : np.ndarray, shape (n_samples, n_all_features)
             Training inputs, passed to acquisition builder for multi-objective.
         y : np.ndarray, shape (n_samples, n_objectives)
             Training target values. For single-objective, used to compute
             best_f for improvement-based acquisition functions.
-        bounds : np.ndarray, shape (2, n_features)
-            Bounds for optimization. Row 0 = lower, row 1 = upper.
+        bounds : np.ndarray, shape (2, n_optimizable_features)
+            Bounds for optimization (optimizable features only).
+            Row 0 = lower, row 1 = upper.
         maximize : list[bool]
             Whether to maximize each objective. True = maximize, False = minimize.
+        fixed_feature_indices : list[int] | None, optional
+            Indices of non-optimizable features in the full X array.
+        fixed_feature_values : list[float] | None, optional
+            Current values for non-optimizable features.
 
         Returns
         -------
-        np.ndarray, shape (n_features,)
-            Optimal input values according to the acquisition function.
+        np.ndarray, shape (n_optimizable_features,)
+            Optimal input values for optimizable features only.
 
         Notes
         -----
@@ -244,6 +260,10 @@ class BayesianRecommender(Recommender):
         The optimization uses L-BFGS-B with multiple random restarts
         to find a global optimum of the acquisition function.
 
+        When fixed_feature_indices and fixed_feature_values are provided,
+        BoTorch's fixed_features parameter is used to hold those dimensions
+        fixed during optimization.
+
         Examples
         --------
         >>> recommender._fit_surrogate(X, y)
@@ -251,13 +271,61 @@ class BayesianRecommender(Recommender):
         """
         acq = self._build_acquisition(X, y, maximize)
 
-        bounds = torch.tensor(bounds, dtype=torch.float64)
+        # Build full bounds including fixed features
+        n_all_features = X.shape[1]
 
-        candidates, acq_values = optimize_acqf(
-            acq, bounds, q=1, num_restarts=5, raw_samples=5
-        )
+        if fixed_feature_indices and fixed_feature_values:
+            # Build full bounds array with fixed features included
+            full_bounds = np.zeros((2, n_all_features))
+            opt_idx = 0
+            for i in range(n_all_features):
+                if i in fixed_feature_indices:
+                    # Fixed feature: set bounds to the fixed value
+                    fixed_idx = fixed_feature_indices.index(i)
+                    val = fixed_feature_values[fixed_idx]
+                    full_bounds[0, i] = val
+                    full_bounds[1, i] = val
+                else:
+                    # Optimizable feature: use provided bounds
+                    full_bounds[0, i] = bounds[0, opt_idx]
+                    full_bounds[1, i] = bounds[1, opt_idx]
+                    opt_idx += 1
 
-        return candidates[0].detach().numpy()
+            bounds_tensor = torch.tensor(full_bounds, dtype=torch.float64)
+
+            # Build fixed_features dict for optimize_acqf
+            fixed_features = {
+                idx: fixed_feature_values[fixed_feature_indices.index(idx)]
+                for idx in fixed_feature_indices
+            }
+
+            candidates, acq_values = optimize_acqf(
+                acq,
+                bounds_tensor,
+                q=1,
+                num_restarts=5,
+                raw_samples=5,
+                fixed_features=fixed_features,
+            )
+
+            # Extract only the optimizable feature values from the result
+            full_candidate = candidates[0].detach().numpy()
+            opt_candidate = np.array(
+                [
+                    full_candidate[i]
+                    for i in range(n_all_features)
+                    if i not in fixed_feature_indices
+                ]
+            )
+            return opt_candidate
+        else:
+            bounds_tensor = torch.tensor(bounds, dtype=torch.float64)
+
+            candidates, acq_values = optimize_acqf(
+                acq, bounds_tensor, q=1, num_restarts=5, raw_samples=5
+            )
+
+            return candidates[0].detach().numpy()
 
     def _build_surrogate(self) -> Surrogate:
         """Build the appropriate surrogate model based on project configuration.

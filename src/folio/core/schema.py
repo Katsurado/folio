@@ -26,6 +26,11 @@ class InputSpec:
         and must contain at least 2 levels. Ignored for continuous inputs.
     units : str | None, optional
         Physical units for the input (e.g., "mL", "°C"). For display purposes only.
+    optimizable : bool, optional
+        If True (default), this input is optimized over during acquisition function
+        optimization. If False, this is a context variable: it is recorded and
+        included in GP fitting, but held fixed during optimization. Use for
+        non-controllable inputs like time-of-day or ambient conditions.
 
     Raises
     ------
@@ -37,6 +42,7 @@ class InputSpec:
     --------
     >>> temp = InputSpec("temperature", "continuous", bounds=(20.0, 100.0))
     >>> solvent = InputSpec("solvent", "categorical", levels=["water", "ethanol"])
+    >>> hour = InputSpec("hour", "continuous", bounds=(0.0, 24.0), optimizable=False)
     """
 
     name: str
@@ -44,6 +50,7 @@ class InputSpec:
     bounds: tuple[float, float] | None = None
     levels: list[str] | None = None
     units: str | None = None
+    optimizable: bool = True
 
     def __post_init__(self):
         if self.type == "continuous":

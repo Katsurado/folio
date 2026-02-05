@@ -85,7 +85,11 @@ class Recommender(ABC):
         """
         self.project = project
 
-    def recommend(self, observations: list["Observation"]) -> dict[str, float]:
+    def recommend(
+        self,
+        observations: list["Observation"],
+        fixed_inputs: dict[str, float] | None = None,
+    ) -> dict[str, float]:
         """Suggest the next experiment inputs based on previous observations.
 
         This method extracts training data from observations using the project's
@@ -98,18 +102,28 @@ class Recommender(ABC):
             Previous experiment observations. May be empty for the first
             recommendation. Failed observations (obs.failed=True) are
             automatically excluded from training data.
+        fixed_inputs : dict[str, float] | None, optional
+            Current values for non-optimizable inputs. Required if the project
+            has inputs with `optimizable=False`. Keys are non-optimizable input
+            names, values are the current values to hold fixed during acquisition
+            optimization.
 
         Returns
         -------
         dict[str, float]
-            Suggested input values for the next experiment. Keys are input
-            names matching the project's InputSpec names, values are the
-            suggested settings. For continuous inputs, values are floats
-            within the specified bounds.
+            Suggested input values for the next experiment. Keys are optimizable
+            input names only (non-optimizable inputs are not included). Values
+            are floats within the specified bounds.
+
+        Raises
+        ------
+        ValueError
+            If the project has non-optimizable inputs but fixed_inputs is not
+            provided, or if fixed_inputs is missing required keys.
 
         Notes
         -----
-        - The returned dict contains all input names defined in the project
+        - The returned dict contains only optimizable input names
         - All values are within their respective bounds
         - Empty observation lists are handled gracefully (typically random sample)
         - Failed observations are filtered out before modeling
@@ -119,16 +133,53 @@ class Recommender(ABC):
         >>> recommender = BayesianRecommender(project)
         >>> # First recommendation with no prior data
         >>> first = recommender.recommend([])
-        >>> # Subsequent recommendation using observed data
-        >>> next_inputs = recommender.recommend(observations)
+        >>> # With non-optimizable inputs
+        >>> next_inputs = recommender.recommend(
+        ...     observations,
+        ...     fixed_inputs={"hour": 14.0, "ambient_temp": 22.0},
+        ... )
         """
+        non_opt_inputs = self.project.get_non_optimizable_inputs()
+
+        # Validate fixed_inputs is provided when needed
+        if non_opt_inputs:
+            if fixed_inputs is None:
+                non_opt_names = [inp.name for inp in non_opt_inputs]
+                raise ValueError(
+                    f"fixed_inputs is required for non-optimizable inputs: "
+                    f"{non_opt_names}"
+                )
+            # Check all required keys are provided
+            missing = [
+                inp.name for inp in non_opt_inputs if inp.name not in fixed_inputs
+            ]
+            if missing:
+                raise ValueError(f"Missing fixed_inputs values: {missing}")
+
         X, y = self.project.get_training_data(observations)
         bounds = self.project.get_optimization_bounds()
         maximize = [
             cfg.objective_mode == "maximize" for cfg in self.project.target_configs
         ]
-        candidate = self.recommend_from_data(X, y, bounds, maximize)
-        names = [inp.name for inp in self.project.inputs if inp.type == "continuous"]
+
+        # Build fixed feature indices and values for recommend_from_data
+        fixed_indices = self.project.get_non_optimizable_indices()
+        fixed_values = None
+        if fixed_indices and fixed_inputs is not None:
+            fixed_values = [fixed_inputs[inp.name] for inp in non_opt_inputs]
+
+        candidate = self.recommend_from_data(
+            X,
+            y,
+            bounds,
+            maximize,
+            fixed_feature_indices=fixed_indices,
+            fixed_feature_values=fixed_values,
+        )
+
+        # Only return optimizable input names
+        optimizable_inputs = self.project.get_optimizable_inputs()
+        names = [inp.name for inp in optimizable_inputs]
 
         next_input = {names[i]: float(candidate[i]) for i in range(len(names))}
 
@@ -167,6 +218,8 @@ class Recommender(ABC):
         y: np.ndarray,
         bounds: np.ndarray,
         maximize: list[bool],
+        fixed_feature_indices: list[int] | None = None,
+        fixed_feature_values: list[float] | None = None,
     ) -> np.ndarray:
         """Suggest next experiment inputs from raw numpy arrays.
 
@@ -176,28 +229,37 @@ class Recommender(ABC):
 
         Parameters
         ----------
-        X : np.ndarray, shape (n_samples, n_features)
+        X : np.ndarray, shape (n_samples, n_all_features)
             Training input features from previous experiments. Each row is
-            an observation, each column is an input dimension. May be empty
+            an observation, each column is an input dimension. Includes both
+            optimizable and non-optimizable features. May be empty
             (shape (0, n_features)) for the first recommendation.
         y : np.ndarray, shape (n_samples, n_objectives)
             Training target values corresponding to X. Each column is one
             objective. For single-objective, shape is (n, 1). Computed from
             outputs using the project's target configurations. May be empty
             for the first recommendation.
-        bounds : np.ndarray, shape (2, n_features)
-            Bounds for each input dimension. Row 0 contains lower bounds,
-            row 1 contains upper bounds (BoTorch format).
+        bounds : np.ndarray, shape (2, n_optimizable_features)
+            Bounds for each optimizable input dimension. Row 0 contains lower
+            bounds, row 1 contains upper bounds (BoTorch format). Does NOT
+            include bounds for non-optimizable features.
         maximize : list[bool]
             Whether to maximize each objective. True = maximize, False = minimize.
             Length must match y.shape[1].
+        fixed_feature_indices : list[int] | None, optional
+            Indices of non-optimizable features in the X array. Used to
+            construct fixed_features for BoTorch's optimize_acqf.
+        fixed_feature_values : list[float] | None, optional
+            Current values for non-optimizable features, corresponding to
+            fixed_feature_indices. These values are held fixed during
+            acquisition optimization.
 
         Returns
         -------
-        np.ndarray, shape (n_features,)
-            Suggested input values for the next experiment. Each element
-            corresponds to an input dimension and must be within the
-            corresponding bounds.
+        np.ndarray, shape (n_optimizable_features,)
+            Suggested input values for optimizable features only. Each element
+            corresponds to an optimizable input dimension and must be within
+            the corresponding bounds.
 
         Notes
         -----
@@ -205,6 +267,7 @@ class Recommender(ABC):
         - All returned values must satisfy: bounds[i, 0] <= result[i] <= bounds[i, 1]
         - For single-objective, maximize has one element and y has shape (n, 1)
         - For multi-objective, maximize has m elements and y has shape (n, m)
+        - The returned array has shape (n_optimizable_features,), NOT (n_all_features,)
 
         Examples
         --------
@@ -214,8 +277,14 @@ class Recommender(ABC):
         >>> bounds = np.array([[0.0, 0.0], [1.0, 1.0]])
         >>> next_x = recommender.recommend_from_data(X, y, bounds, [True])
 
-        >>> # Multi-objective
-        >>> y = np.array([[1.0, 0.5], [2.0, 0.3], [1.5, 0.8]])  # 2 objectives
-        >>> next_x = recommender.recommend_from_data(X, y, bounds, [True, False])
+        >>> # With non-optimizable features
+        >>> X = np.array([[0.2, 0.5, 0.3], [0.5, 0.5, 0.7]])  # 3 features
+        >>> bounds = np.array([[0.0, 0.0], [1.0, 1.0]])  # Only 2 optimizable
+        >>> next_x = recommender.recommend_from_data(
+        ...     X, y, bounds, [True],
+        ...     fixed_feature_indices=[1],
+        ...     fixed_feature_values=[0.5],
+        ... )
+        >>> next_x.shape  # (2,) - only optimizable features
         """
         ...

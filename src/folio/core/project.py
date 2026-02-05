@@ -297,6 +297,76 @@ class Project:
         """
         return [inp.name for inp in self.inputs]
 
+    def get_optimizable_inputs(self) -> list[InputSpec]:
+        """Return list of optimizable (controllable) inputs.
+
+        Returns inputs that have `optimizable=True` and are continuous.
+        These are the inputs that will be optimized during acquisition
+        function optimization.
+
+        Returns
+        -------
+        list[InputSpec]
+            Optimizable continuous input specifications in definition order.
+        """
+        return [
+            inp for inp in self.inputs if inp.type == "continuous" and inp.optimizable
+        ]
+
+    def get_non_optimizable_inputs(self) -> list[InputSpec]:
+        """Return list of non-optimizable (context) inputs.
+
+        Returns inputs that have `optimizable=False` and are continuous.
+        These are context variables that are recorded and included in GP
+        training but are held fixed during acquisition optimization.
+
+        Returns
+        -------
+        list[InputSpec]
+            Non-optimizable continuous input specifications in definition order.
+        """
+        return [
+            inp
+            for inp in self.inputs
+            if inp.type == "continuous" and not inp.optimizable
+        ]
+
+    def get_non_optimizable_indices(self) -> list[int]:
+        """Return indices of non-optimizable features in the training X array.
+
+        These indices correspond to the positions of non-optimizable inputs
+        among all continuous inputs. Used to construct the `fixed_features`
+        dict for BoTorch's `optimize_acqf`.
+
+        Returns
+        -------
+        list[int]
+            Indices of non-optimizable features in the X array.
+
+        Examples
+        --------
+        >>> project = Project(
+        ...     id=1, name="example",
+        ...     inputs=[
+        ...         InputSpec("x1", "continuous", bounds=(0, 1)),
+        ...         InputSpec("ctx", "continuous", bounds=(0, 1), optimizable=False),
+        ...         InputSpec("x2", "continuous", bounds=(0, 1)),
+        ...     ],
+        ...     outputs=[OutputSpec("y")],
+        ...     target_configs=[TargetConfig(objective="y")],
+        ... )
+        >>> project.get_non_optimizable_indices()
+        [1]
+        """
+        indices = []
+        idx = 0
+        for inp in self.inputs:
+            if inp.type == "continuous":
+                if not inp.optimizable:
+                    indices.append(idx)
+                idx += 1
+        return indices
+
     def get_output_names(self) -> list[str]:
         """Return list of output variable names in definition order.
 
@@ -320,16 +390,17 @@ class Project:
         return [inp.bounds for inp in self.inputs if inp.type == "continuous"]
 
     def get_optimization_bounds(self) -> np.ndarray:
-        """Return bounds in BoTorch optimize_acqf format.
+        """Return bounds in BoTorch optimize_acqf format for optimizable inputs only.
 
         Returns bounds as a 2D array suitable for BoTorch's optimize_acqf function.
         Row 0 contains lower bounds, row 1 contains upper bounds for each
-        continuous input dimension.
+        optimizable continuous input dimension. Non-optimizable (context) inputs
+        are excluded.
 
         Returns
         -------
         np.ndarray, shape (2, d)
-            Bounds array where d is the number of continuous inputs.
+            Bounds array where d is the number of optimizable continuous inputs.
             bounds[0, :] are lower bounds, bounds[1, :] are upper bounds.
 
         Examples
@@ -350,17 +421,16 @@ class Project:
 
         Notes
         -----
-        Only continuous inputs are included. Categorical inputs are excluded
-        since they don't have numeric bounds suitable for gradient-based
-        optimization.
+        Only continuous inputs with `optimizable=True` are included.
+        Categorical inputs and non-optimizable (context) inputs are excluded.
         """
-        bounds = self.get_bounds()
-        num_features = len(bounds)
+        optimizable = self.get_optimizable_inputs()
+        num_features = len(optimizable)
         opt_bounds = np.zeros((2, num_features))
 
-        for feature in range(num_features):
-            opt_bounds[0, feature] = bounds[feature][0]
-            opt_bounds[1, feature] = bounds[feature][1]
+        for i, inp in enumerate(optimizable):
+            opt_bounds[0, i] = inp.bounds[0]
+            opt_bounds[1, i] = inp.bounds[1]
 
         return opt_bounds
 

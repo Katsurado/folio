@@ -312,7 +312,11 @@ class Folio:
             auth_token=self.auth_token,
         )
 
-    def suggest(self, project_name: str) -> list[dict[str, float]]:
+    def suggest(
+        self,
+        project_name: str,
+        fixed_inputs: dict[str, float] | None = None,
+    ) -> list[dict[str, float]]:
         """Get suggested next experiment inputs for a project.
 
         Uses the project's recommender to suggest the next experiment based
@@ -323,18 +327,27 @@ class Folio:
         ----------
         project_name : str
             Name of the project to get suggestions for.
+        fixed_inputs : dict[str, float] | None, optional
+            Current values for non-optimizable inputs. Required if the project
+            has inputs with `optimizable=False`. Keys are non-optimizable input
+            names, values are the current values to hold fixed during acquisition
+            optimization.
 
         Returns
         -------
         list[dict[str, float]]
-            List of suggested input configurations. Each dict maps input names
-            to suggested values. Currently returns a single suggestion, but
-            the list format supports batch recommendations in the future.
+            List of suggested input configurations. Each dict maps optimizable
+            input names to suggested values. Non-optimizable inputs are not
+            included. Currently returns a single suggestion, but the list
+            format supports batch recommendations in the future.
 
         Raises
         ------
         ProjectNotFoundError
             If no project with the given name exists.
+        ValueError
+            If the project has non-optimizable inputs but fixed_inputs is not
+            provided, or if fixed_inputs is missing required keys.
 
         Notes
         -----
@@ -342,6 +355,7 @@ class Folio:
         - If fewer observations than `n_initial` in RecommenderConfig, returns
           random samples (exploration phase)
         - Failed observations are excluded from model training
+        - The returned dict contains only optimizable input names
 
         Examples
         --------
@@ -349,13 +363,19 @@ class Folio:
         >>> next_experiment = suggestions[0]
         >>> print(next_experiment)
         {'temperature': 85.2, 'pressure': 3.7}
+
+        >>> # With non-optimizable inputs
+        >>> suggestions = folio.suggest(
+        ...     "claude_light",
+        ...     fixed_inputs={"hour": 14.0, "ambient_temp": 22.0},
+        ... )
         """
         project = self.get_project(project_name)
         if self._recommenders.get(project_name) is None:
             self._recommenders[project_name] = self._build_recommender(project)
         rec = self._recommenders[project_name]
         obs = self.get_observations(project_name)
-        suggestions = rec.recommend(obs)
+        suggestions = rec.recommend(obs, fixed_inputs=fixed_inputs)
         return [suggestions]
 
     def get_project(self, name: str) -> Project:

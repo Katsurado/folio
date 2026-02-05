@@ -31,6 +31,8 @@ class ConcreteRecommender(Recommender):
         y: np.ndarray,
         bounds: np.ndarray,
         maximize: list[bool],
+        fixed_feature_indices: list[int] | None = None,
+        fixed_feature_values: list[float] | None = None,
     ) -> np.ndarray:
         """Record arguments and return midpoint of bounds.
 

@@ -77,6 +77,8 @@ class RandomRecommender(Recommender):
         y: np.ndarray,
         bounds: np.ndarray,
         maximize: list[bool],
+        fixed_feature_indices: list[int] | None = None,
+        fixed_feature_values: list[float] | None = None,
     ) -> np.ndarray:
         """Sample uniformly at random within bounds, ignoring X and y.
 
@@ -86,16 +88,20 @@ class RandomRecommender(Recommender):
             Training inputs. Ignored by RandomRecommender.
         y : np.ndarray, shape (n_samples, n_objectives)
             Training targets. Ignored by RandomRecommender.
-        bounds : np.ndarray, shape (2, n_features)
-            Bounds for each input dimension. Row 0 contains lower bounds,
-            row 1 contains upper bounds (BoTorch format).
+        bounds : np.ndarray, shape (2, n_optimizable_features)
+            Bounds for optimizable input dimensions. Row 0 contains lower
+            bounds, row 1 contains upper bounds (BoTorch format).
         maximize : list[bool]
             Whether to maximize each objective. Ignored by RandomRecommender.
+        fixed_feature_indices : list[int] | None, optional
+            Indices of non-optimizable features. Ignored by RandomRecommender.
+        fixed_feature_values : list[float] | None, optional
+            Current values for non-optimizable features. Ignored.
 
         Returns
         -------
-        np.ndarray, shape (n_features,)
-            Uniformly sampled values within bounds.
+        np.ndarray, shape (n_optimizable_features,)
+            Uniformly sampled values within bounds for optimizable features.
 
         Examples
         --------

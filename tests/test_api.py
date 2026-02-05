@@ -1567,3 +1567,305 @@ class TestInitializeFromLLM:
                 backend=expensive_backend,
                 max_cost_per_call=0.50,
             )
+
+
+# =============================================================================
+# Non-Optimizable (Context) Inputs Tests
+# =============================================================================
+
+
+class TestNonOptimizableInputs:
+    """Tests for Folio with non-optimizable (context) inputs.
+
+    Non-optimizable inputs are:
+    - Recorded in observations (for GP training)
+    - Fixed during acquisition optimization (not searched over)
+    - Not included in suggestions returned by suggest()
+    """
+
+    @pytest.fixture
+    def non_optimizable_inputs(self):
+        """Input specifications including non-optimizable inputs."""
+        return [
+            InputSpec("R", "continuous", bounds=(0.0, 255.0)),
+            InputSpec("G", "continuous", bounds=(0.0, 255.0)),
+            InputSpec("B", "continuous", bounds=(0.0, 255.0)),
+            InputSpec("hour", "continuous", bounds=(0.0, 24.0), optimizable=False),
+            InputSpec(
+                "ambient_temp", "continuous", bounds=(15.0, 35.0), optimizable=False
+            ),
+        ]
+
+    @pytest.fixture
+    def non_optimizable_outputs(self):
+        """Output specifications for non-optimizable tests."""
+        return [OutputSpec("intensity")]
+
+    @pytest.fixture
+    def non_optimizable_target_configs(self):
+        """Target config for non-optimizable tests."""
+        return [TargetConfig(objective="intensity", objective_mode="maximize")]
+
+    def test_create_project_with_non_optimizable_inputs(
+        self,
+        folio,
+        non_optimizable_inputs,
+        non_optimizable_outputs,
+        non_optimizable_target_configs,
+    ):
+        """Create a project with non-optimizable inputs successfully."""
+        folio.create_project(
+            name="non_optimizable_project",
+            inputs=non_optimizable_inputs,
+            outputs=non_optimizable_outputs,
+            target_configs=non_optimizable_target_configs,
+        )
+
+        project = folio.get_project("non_optimizable_project")
+        assert len(project.inputs) == 5
+        # Verify optimizable flags preserved
+        optimizable = [inp for inp in project.inputs if inp.optimizable]
+        non_optimizable = [inp for inp in project.inputs if not inp.optimizable]
+        assert len(optimizable) == 3
+        assert len(non_optimizable) == 2
+
+    def test_add_observation_requires_non_optimizable_values(
+        self,
+        folio,
+        non_optimizable_inputs,
+        non_optimizable_outputs,
+        non_optimizable_target_configs,
+    ):
+        """Adding observation requires non-optimizable input values."""
+        folio.create_project(
+            name="obs_non_opt_test",
+            inputs=non_optimizable_inputs,
+            outputs=non_optimizable_outputs,
+            target_configs=non_optimizable_target_configs,
+        )
+
+        # Missing non-optimizable values should raise
+        with pytest.raises(InvalidInputError, match="(?i)missing"):
+            folio.add_observation(
+                "obs_non_opt_test",
+                inputs={"R": 100.0, "G": 150.0, "B": 200.0},
+                outputs={"intensity": 0.75},
+            )
+
+    def test_add_observation_with_non_optimizable_values(
+        self,
+        folio,
+        non_optimizable_inputs,
+        non_optimizable_outputs,
+        non_optimizable_target_configs,
+    ):
+        """Adding observation with all values (including non-optimizable) succeeds."""
+        folio.create_project(
+            name="obs_full_non_opt_test",
+            inputs=non_optimizable_inputs,
+            outputs=non_optimizable_outputs,
+            target_configs=non_optimizable_target_configs,
+        )
+
+        folio.add_observation(
+            "obs_full_non_opt_test",
+            inputs={
+                "R": 100.0,
+                "G": 150.0,
+                "B": 200.0,
+                "hour": 12.0,
+                "ambient_temp": 22.0,
+            },
+            outputs={"intensity": 0.75},
+        )
+
+        observations = folio.get_observations("obs_full_non_opt_test")
+        assert len(observations) == 1
+        assert observations[0].inputs["hour"] == 12.0
+        assert observations[0].inputs["ambient_temp"] == 22.0
+
+    def test_suggest_returns_only_optimizable_keys(
+        self,
+        folio,
+        non_optimizable_inputs,
+        non_optimizable_outputs,
+        non_optimizable_target_configs,
+    ):
+        """suggest() returns dict with only optimizable input names."""
+        folio.create_project(
+            name="suggest_non_opt_test",
+            inputs=non_optimizable_inputs,
+            outputs=non_optimizable_outputs,
+            target_configs=non_optimizable_target_configs,
+        )
+
+        # Add observations with non-optimizable values
+        for i in range(5):
+            folio.add_observation(
+                "suggest_non_opt_test",
+                inputs={
+                    "R": 50.0 + i * 40,
+                    "G": 100.0 + i * 20,
+                    "B": 150.0 + i * 10,
+                    "hour": 8.0 + i * 2,
+                    "ambient_temp": 20.0 + i,
+                },
+                outputs={"intensity": 0.5 + i * 0.1},
+            )
+
+        suggestions = folio.suggest(
+            "suggest_non_opt_test",
+            fixed_inputs={"hour": 14.0, "ambient_temp": 23.0},
+        )
+
+        assert len(suggestions) == 1
+        assert set(suggestions[0].keys()) == {"R", "G", "B"}
+        assert "hour" not in suggestions[0]
+        assert "ambient_temp" not in suggestions[0]
+
+    def test_suggest_requires_context_for_non_optimizable_project(
+        self,
+        folio,
+        non_optimizable_inputs,
+        non_optimizable_outputs,
+        non_optimizable_target_configs,
+    ):
+        """suggest() raises if context not provided for project with non-optimizable."""
+        folio.create_project(
+            name="suggest_no_context_test",
+            inputs=non_optimizable_inputs,
+            outputs=non_optimizable_outputs,
+            target_configs=non_optimizable_target_configs,
+        )
+
+        # Add some observations
+        folio.add_observation(
+            "suggest_no_context_test",
+            inputs={
+                "R": 100.0,
+                "G": 150.0,
+                "B": 200.0,
+                "hour": 12.0,
+                "ambient_temp": 22.0,
+            },
+            outputs={"intensity": 0.75},
+        )
+
+        with pytest.raises(ValueError, match="(?i)fixed_inputs|required|missing"):
+            folio.suggest("suggest_no_context_test")
+
+    def test_suggest_values_within_optimizable_bounds(
+        self,
+        folio,
+        non_optimizable_inputs,
+        non_optimizable_outputs,
+        non_optimizable_target_configs,
+    ):
+        """suggest() returns values within optimizable input bounds."""
+        folio.create_project(
+            name="bounds_non_opt_test",
+            inputs=non_optimizable_inputs,
+            outputs=non_optimizable_outputs,
+            target_configs=non_optimizable_target_configs,
+        )
+
+        for i in range(5):
+            folio.add_observation(
+                "bounds_non_opt_test",
+                inputs={
+                    "R": 50.0 + i * 40,
+                    "G": 100.0 + i * 20,
+                    "B": 150.0 + i * 10,
+                    "hour": 8.0 + i * 2,
+                    "ambient_temp": 20.0 + i,
+                },
+                outputs={"intensity": 0.5 + i * 0.1},
+            )
+
+        for _ in range(5):
+            suggestions = folio.suggest(
+                "bounds_non_opt_test",
+                fixed_inputs={"hour": 14.0, "ambient_temp": 23.0},
+            )
+            s = suggestions[0]
+            assert 0.0 <= s["R"] <= 255.0
+            assert 0.0 <= s["G"] <= 255.0
+            assert 0.0 <= s["B"] <= 255.0
+
+    def test_project_without_non_optimizable_does_not_require_context(
+        self, folio, sample_inputs, sample_outputs, sample_target_configs
+    ):
+        """suggest() works without context for projects without non-optimizable."""
+        folio.create_project(
+            name="all_optimizable_project",
+            inputs=sample_inputs,
+            outputs=sample_outputs,
+            target_configs=sample_target_configs,
+        )
+
+        # Should work without context parameter
+        suggestions = folio.suggest("all_optimizable_project")
+        assert len(suggestions) == 1
+        assert "temperature" in suggestions[0]
+
+    def test_full_workflow_with_non_optimizable(
+        self,
+        folio,
+        non_optimizable_inputs,
+        non_optimizable_outputs,
+        non_optimizable_target_configs,
+    ):
+        """Complete workflow with non-optimizable inputs."""
+        # 1. Create project
+        folio.create_project(
+            name="full_non_opt_workflow",
+            inputs=non_optimizable_inputs,
+            outputs=non_optimizable_outputs,
+            target_configs=non_optimizable_target_configs,
+        )
+
+        # 2. Add initial observations with varying context
+        for i in range(5):
+            folio.add_observation(
+                "full_non_opt_workflow",
+                inputs={
+                    "R": 50.0 + i * 40,
+                    "G": 100.0 + i * 20,
+                    "B": 150.0 + i * 10,
+                    "hour": 6.0 + i * 3,
+                    "ambient_temp": 18.0 + i * 2,
+                },
+                outputs={"intensity": 0.4 + i * 0.15},
+            )
+
+        # 3. Get suggestion with current context
+        current_context = {"hour": 14.0, "ambient_temp": 24.0}
+        suggestions = folio.suggest(
+            "full_non_opt_workflow", fixed_inputs=current_context
+        )
+
+        assert len(suggestions) == 1
+        assert set(suggestions[0].keys()) == {"R", "G", "B"}
+
+        # 4. Add observation from suggestion (with current context)
+        folio.add_observation(
+            "full_non_opt_workflow",
+            inputs={
+                **suggestions[0],
+                **current_context,
+            },
+            outputs={"intensity": 0.85},
+        )
+
+        # 5. Verify observation was recorded
+        observations = folio.get_observations("full_non_opt_workflow")
+        assert len(observations) == 6
+
+        # 6. Get another suggestion with different context
+        evening_context = {"hour": 20.0, "ambient_temp": 19.0}
+        evening_suggestions = folio.suggest(
+            "full_non_opt_workflow", fixed_inputs=evening_context
+        )
+
+        assert len(evening_suggestions) == 1
+        assert set(evening_suggestions[0].keys()) == {"R", "G", "B"}
