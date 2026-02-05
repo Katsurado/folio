@@ -1660,3 +1660,167 @@ class TestBayesianRecommenderNonOptimizableRecommendFromData:
         # (we just verify both are valid)
         assert result_low.shape == (2,)
         assert result_high.shape == (2,)
+
+
+class TestMultiObjectiveNonOptimizableInputs:
+    """Tests for multi-objective optimization with non-optimizable inputs."""
+
+    @pytest.fixture
+    def mo_project_with_non_optimizable(self):
+        """Multi-objective project with non-optimizable context inputs."""
+        return Project(
+            id=1,
+            name="mo_context_project",
+            inputs=[
+                InputSpec("x1", "continuous", bounds=(0.0, 10.0)),
+                InputSpec("x2", "continuous", bounds=(0.0, 10.0)),
+                InputSpec("hour", "continuous", bounds=(0.0, 24.0), optimizable=False),
+                InputSpec("temp", "continuous", bounds=(15.0, 35.0), optimizable=False),
+            ],
+            outputs=[OutputSpec("y1"), OutputSpec("y2")],
+            target_configs=[
+                TargetConfig(objective="y1", objective_mode="maximize"),
+                TargetConfig(objective="y2", objective_mode="minimize"),
+            ],
+            reference_point=[0.0, 20.0],
+            recommender_config=RecommenderConfig(
+                type="bayesian",
+                surrogate="multitask_gp",
+                mo_acquisition="nehvi",
+                n_initial=3,
+            ),
+        )
+
+    @pytest.fixture
+    def mo_observations_with_context(self):
+        """Multi-objective observations with context values."""
+        return [
+            Observation(
+                project_id=1,
+                inputs={"x1": 2.0, "x2": 3.0, "hour": 10.0, "temp": 22.0},
+                outputs={"y1": 5.0, "y2": 8.0},
+            ),
+            Observation(
+                project_id=1,
+                inputs={"x1": 5.0, "x2": 5.0, "hour": 14.0, "temp": 25.0},
+                outputs={"y1": 10.0, "y2": 5.0},
+            ),
+            Observation(
+                project_id=1,
+                inputs={"x1": 8.0, "x2": 2.0, "hour": 18.0, "temp": 20.0},
+                outputs={"y1": 8.0, "y2": 3.0},
+            ),
+            Observation(
+                project_id=1,
+                inputs={"x1": 3.0, "x2": 7.0, "hour": 12.0, "temp": 23.0},
+                outputs={"y1": 12.0, "y2": 6.0},
+            ),
+        ]
+
+    def test_mo_recommend_returns_only_optimizable_keys(
+        self, mo_project_with_non_optimizable, mo_observations_with_context
+    ):
+        """Multi-objective recommend() returns only optimizable input names."""
+        torch.manual_seed(42)
+        recommender = BayesianRecommender(mo_project_with_non_optimizable)
+        result = recommender.recommend(
+            mo_observations_with_context,
+            fixed_inputs={"hour": 12.0, "temp": 22.0},
+        )
+        assert set(result.keys()) == {"x1", "x2"}
+        assert "hour" not in result
+        assert "temp" not in result
+
+    def test_mo_recommend_values_within_bounds(
+        self, mo_project_with_non_optimizable, mo_observations_with_context
+    ):
+        """Multi-objective recommend() returns values within optimizable bounds."""
+        torch.manual_seed(42)
+        recommender = BayesianRecommender(mo_project_with_non_optimizable)
+        result = recommender.recommend(
+            mo_observations_with_context,
+            fixed_inputs={"hour": 12.0, "temp": 22.0},
+        )
+        assert 0.0 <= result["x1"] <= 10.0
+        assert 0.0 <= result["x2"] <= 10.0
+
+    def test_mo_recommend_requires_fixed_inputs(
+        self, mo_project_with_non_optimizable, mo_observations_with_context
+    ):
+        """Multi-objective recommend() raises if fixed_inputs not provided."""
+        recommender = BayesianRecommender(mo_project_with_non_optimizable)
+        with pytest.raises(ValueError, match="(?i)fixed_inputs|required|missing"):
+            recommender.recommend(mo_observations_with_context)
+
+    def test_mo_gp_trained_on_all_features(
+        self, mo_project_with_non_optimizable, mo_observations_with_context
+    ):
+        """Multi-objective GP is trained on all features including context."""
+        torch.manual_seed(42)
+        recommender = BayesianRecommender(mo_project_with_non_optimizable)
+        recommender.recommend(
+            mo_observations_with_context,
+            fixed_inputs={"hour": 12.0, "temp": 22.0},
+        )
+        # Surrogate should be fitted
+        assert recommender._surrogate is not None
+        assert recommender._surrogate._is_fitted
+
+    def test_mo_recommend_from_data_with_fixed_features(
+        self, mo_project_with_non_optimizable
+    ):
+        """Multi-objective recommend_from_data works with fixed features."""
+        torch.manual_seed(42)
+        recommender = BayesianRecommender(mo_project_with_non_optimizable)
+        # X has 4 columns: x1, x2, hour, temp
+        X = np.array(
+            [
+                [2.0, 3.0, 10.0, 22.0],
+                [5.0, 5.0, 14.0, 25.0],
+                [8.0, 2.0, 18.0, 20.0],
+                [3.0, 7.0, 12.0, 23.0],
+            ]
+        )
+        # y has 2 columns for 2 objectives
+        y = np.array(
+            [
+                [5.0, 8.0],
+                [10.0, 5.0],
+                [8.0, 3.0],
+                [12.0, 6.0],
+            ]
+        )
+        # Bounds only for optimizable (x1, x2)
+        bounds = np.array([[0.0, 0.0], [10.0, 10.0]])
+
+        result = recommender.recommend_from_data(
+            X,
+            y,
+            bounds,
+            [True, False],  # maximize y1, minimize y2
+            fixed_feature_indices=[2, 3],
+            fixed_feature_values=[12.0, 22.0],
+        )
+        # Result shape matches optimizable dimensions
+        assert result.shape == (2,)
+        # Values within bounds
+        assert np.all((bounds[0, :] <= result) & (result <= bounds[1, :]))
+
+    def test_mo_few_observations_returns_random(self, mo_project_with_non_optimizable):
+        """Multi-objective with few observations returns random sample."""
+        observations = [
+            Observation(
+                project_id=1,
+                inputs={"x1": 5.0, "x2": 5.0, "hour": 12.0, "temp": 22.0},
+                outputs={"y1": 10.0, "y2": 5.0},
+            ),
+        ]
+        recommender = BayesianRecommender(mo_project_with_non_optimizable)
+        result = recommender.recommend(
+            observations,
+            fixed_inputs={"hour": 14.0, "temp": 24.0},
+        )
+        # Only optimizable inputs in result
+        assert set(result.keys()) == {"x1", "x2"}
+        assert 0.0 <= result["x1"] <= 10.0
+        assert 0.0 <= result["x2"] <= 10.0
